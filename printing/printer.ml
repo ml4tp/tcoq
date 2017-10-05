@@ -386,6 +386,12 @@ let default_pr_goal gs =
     pr_context_of env sigma ++ cut () ++
       str "============================" ++ cut ()  ++
       pr_goal_concl_style_env env sigma concl in
+  (* deh(gs: Goal.goal Evd.sigma) *)
+  (* deh(sigma: Evd.evar_map) *)
+  (* deh(env: Environ.env) *)
+  (* deh(concl: Constr.t = Term.constr) *)
+  (* deh(g: Goal.goal = Evar.t) *)
+  (* deh(cut and v are Pp operations) *)
   str "  " ++ v 0 goal
 
 (* display a goal tag *)

@@ -117,6 +117,7 @@ let current_proof_statement () =
 
 let solve ?with_end_tac gi info_lvl tac pr =
   try 
+    print_string ("deh(proofs/pfedit.ml@solve)\n");
     let tac = match with_end_tac with
       | None -> tac
       | Some etac -> Proofview.tclTHEN tac etac in

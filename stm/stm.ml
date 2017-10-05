@@ -1745,6 +1745,7 @@ end = struct (* {{{ *)
   let vernac_interp ~solve ~abstract cancel nworkers safe_id id
     { indentation; verbose; loc; expr = e; strlen }
   =
+    print_string ("deh(vernac_interp)");
     let e, time, fail =
       let rec find ~time ~fail = function
         | VernacTime (_,e) -> find ~time:true ~fail e
@@ -2425,6 +2426,137 @@ let snapshot_vio ldir long_f_dot_vo =
 
 let reset_task_queue = Slaves.reset_task_queue
 
+let deh_show_vernac_expr ve =
+  match ve with
+  | VernacLoad (_, _) -> (* verbose_flag * string *) "VernacLoad(?, ?)"
+  | VernacTime _ -> "VernacTime"
+  | VernacRedirect _ -> "VernacRedirect"
+  | VernacTimeout _ -> "VernacTimeout"
+  | VernacFail _ -> "VernacFail"
+  | VernacError _ -> "VernacError"
+
+  | VernacSyntaxExtension _ -> "VernacSyntaxExtension"
+  | VernacOpenCloseScope _ -> "VernacOpenCloseScope"
+  | VernacDelimiters _ -> "VernacDelimiters"
+  | VernacBindScope _ -> "VernacBindScope"
+  | VernacInfix _ -> "VernacInfix"
+  | VernacNotation _ -> "VernacNotation"
+  | VernacNotationAddFormat _ -> "VernacNotationAddFormat"
+
+  | VernacDefinition _ -> "VernacDefinition"
+  | VernacStartTheoremProof _ -> "VernacStartTheoremProof"
+  | VernacEndProof _ -> "VernacEndProof"
+  | VernacExactProof _ -> "VernacExactProof"
+  | VernacAssumption _ -> "VernacAssumption"
+  | VernacInductive _ -> "VernacInductive"
+  | VernacFixpoint _ -> "VernacFixpoint"
+  | VernacCoFixpoint _ -> "VernacCoFixpoint"
+  | VernacScheme _ -> "VernacScheme"
+  | VernacCombinedScheme _ -> "VernacCombinedScheme"
+  | VernacUniverse _ -> "VernacUniverse"
+  | VernacConstraint _ -> "VernacConstraint"
+
+  | VernacBeginSection _ -> "VernacBeginSection"
+  | VernacEndSegment _ -> "VernacEndSegment"
+  | VernacRequire _ -> "VernacRequire"
+  | VernacImport _ -> "VernacImport"
+  | VernacCanonical _ -> "VernacCanonical"
+  | VernacCoercion _ -> "VernacCoercion"
+  | VernacIdentityCoercion _ -> "VernacIdentityCoercion"
+  | VernacNameSectionHypSet _ -> "VernacNameSectionHypSet"
+
+  | VernacInstance _ -> "VernacInstance"
+  | VernacContext _ -> "VernacContext"
+  | VernacDeclareInstances _ -> "VernacDeclareInstances"
+  | VernacDeclareClass _ -> "VernacDeclareClass"
+
+  | VernacDeclareModule _ -> "VernacDeclareModule"
+  | VernacDefineModule _ -> "VernacDefineModule"
+  | VernacDeclareModuleType _ -> "VernacDeclareModuleType"
+  | VernacInclude _ -> "VernacInclude"
+
+  | VernacSolveExistential _ -> "VernacSolveExistential"
+
+  | VernacAddLoadPath _ -> "VernacAddLoadPath"
+  | VernacRemoveLoadPath _ -> "VernacRemoveLoadPath"
+  | VernacAddMLPath _ -> "VernacAddMLPath"
+  | VernacDeclareMLModule _ -> "VernacDeclareMLModule"
+  | VernacChdir _ -> "VernacChdir"
+
+  | VernacWriteState _ -> "VernacWriteState"
+  | VernacRestoreState _ -> "VernacRestoreState"
+
+  | VernacResetName _ -> "VernacResetName"
+  | VernacResetInitial -> "VernacResetInitial"
+  | VernacBack _ -> "VernacBack"
+  | VernacBackTo _ -> "VernacBackTo"
+
+  | VernacCreateHintDb _ -> "VernacCreateHintDb"
+  | VernacRemoveHints _ -> "VernacRemoveHints"
+  | VernacHints _ -> "VernacHints"
+  | VernacSyntacticDefinition _ -> "VernacSyntacticDefinition"
+  | VernacDeclareImplicits _ -> "VernacDeclareImplicits"
+  | VernacArguments _ -> "VernacArguments"
+  | VernacArgumentsScope _ -> "VernacArgumentsScope"
+  | VernacReserve _ -> "VernacReserve"
+  | VernacGeneralizable _ -> "VernacGeneralizable"
+  | VernacSetOpacity _ -> "VernacSetOpacity"
+  | VernacSetStrategy _ -> "VernacSetStrategy"
+  | VernacUnsetOption _ -> "VernacUnsetOption"
+  | VernacSetOption _ -> "VernacSetOption"
+  | VernacSetAppendOption _ -> "VernacSetAppendOption"
+  | VernacAddOption _ -> "VernacAddOption"
+  | VernacRemoveOption _ -> "VernacRemoveOption"
+  | VernacMemOption _ -> "VernacMemOption"
+  | VernacPrintOption _ -> "VernacPrintOption"
+  | VernacCheckMayEval _ -> "VernacCheckMayEval"
+  | VernacGlobalCheck _ -> "VernacGlobalCheck"
+  | VernacDeclareReduction _ -> "VernacDeclareReduction"
+  | VernacPrint _ -> "VernacPrint"
+  | VernacSearch _ -> "VernacSearch"
+  | VernacLocate _ -> "VernacLocate"
+  | VernacRegister _ -> "VernacRegister"
+  | VernacComments _ -> "VernacComments"
+
+  | VernacStm _ -> "VernacStm"
+
+  | VernacGoal _ -> "VernacGoal"
+  | VernacAbort _ -> "VernacAbort"
+  | VernacAbortAll -> "VernacAbortAll"
+  | VernacRestart -> "VernacRestart"
+  | VernacUndo _ -> "VernacUndo"
+  | VernacUndoTo _ -> "VernacUndoTo"
+  | VernacBacktrack _ -> "VernacBacktrack"
+  | VernacFocus _ -> "VernacFocus"
+  | VernacUnfocus -> "VernacUnfocus"
+  | VernacUnfocused -> "VernacUnfocused"
+  | VernacBullet _ -> "VernacBullet"
+  | VernacSubproof _ -> "VernacSubproof"
+  | VernacEndSubproof -> "VernacEndSubproof"
+  | VernacShow _ -> "VernacShow"
+  | VernacCheckGuard -> "VernacCheckGuard"
+  | VernacProof _ -> "VernacProof"
+  | VernacProofMode _ -> "VernacProofMode"
+
+  | VernacToplevelControl _ -> "VernacToplevelControl"
+
+  | VernacExtend ((str, i), _) -> "VernacExtend(" ^ str ^ ", " ^ string_of_int i ^ ")"
+
+  | VernacProgram _ -> "VernacProgram"
+  | VernacPolymorphic _ -> "VernacPolymorphic"
+  | VernacLocal _ -> "VernacLocal"
+
+let rec deh_show_vernac_type vt =
+  match vt with
+  | VtStartProof (_) -> "VtStartProof"
+  | VtSideff (_) -> "VtSideff"
+  | VtQed (_) -> "VtQed"
+  | VtProofStep (_) -> "VtProofStep"
+  | VtProofMode (_) -> "VtProofMode"
+  | VtQuery (_, _) -> "VtQuery"
+  | VtStm (_, _) -> "VtStm"
+  | VtUnknown -> "VtUnknown"
+
 (* Document building *)
 let process_transaction ?(newtip=Stateid.fresh ()) ~tty
   ({ verbose; loc; expr } as x) c =
@@ -2436,6 +2568,8 @@ let process_transaction ?(newtip=Stateid.fresh ()) ~tty
     let rc = begin
       prerr_endline (fun () ->
         "  classified as: " ^ string_of_vernac_classification c);
+      let (vt, vw) = c in
+      print_string ("deh(@process_transaction; vernac_type: " ^ deh_show_vernac_type vt ^ "; vernac_expr: " ^ deh_show_vernac_expr expr ^ ")\n");
       match c with
       (* PG stuff *)    
       | VtStm(VtPG,false), VtNow -> vernac_interp Stateid.dummy x; `Ok
@@ -2546,6 +2680,12 @@ let process_transaction ?(newtip=Stateid.fresh ()) ~tty
             match parallel with
             | `Yes(solve,abstract) -> `TacQueue (solve, abstract, ref false)
             | `No -> `MainQueue in
+          let deh_print_proof_block_name cblock = 
+            match cblock with
+            | Some x -> print_string x
+            | None -> print_string "NONE"
+          in
+          (* deh_print_proof_block_name cblock ; *)
           VCS.commit id (mkTransTac x cblock queue);
           (* Static proof block detection delayed until an error really occurs.
              If/when and UI will make something useful with this piece of info,
@@ -2828,11 +2968,20 @@ let interp verb (loc,e) =
      (!Flags.async_proofs_mode = Flags.APoff &&
       !Flags.compilation_mode = Flags.BuildVo) then
     let vcs = VCS.backup () in
+    (*
     let print_goals =
       verb && match clas with
        | VtQuery _, _ -> false
        | (VtProofStep _ | VtStm (VtBack _, _) | VtStartProof _), _ -> true
        | _ -> not !Flags.coqtop_ui in
+    *)
+    let print_goals =
+      match clas with
+       | VtQuery _, _ -> false
+       | (VtProofStep _ | VtStm (VtBack _, _) | VtStartProof _), _ -> true
+       | _ -> not !Flags.coqtop_ui 
+    in
+    print_string (Printf.sprintf "deh(print_goals: %b?)" print_goals);
     try finish ~print_goals ()
     with e ->
       let e = CErrors.push e in
