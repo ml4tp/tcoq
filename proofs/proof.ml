@@ -347,7 +347,7 @@ let run_tactic env tac pr =
     Proofview.Unsafe.tclEVARS sigma >>= fun () ->
     Proofview.tclUNIT retrieved
   in
-  print_string "deh(run_tactic)\n";
+  (* print_string "deh(run_tactic)\n"; *)
   let (retrieved,proofview,(status,to_shelve,give_up),info_trace) =
     Proofview.apply env tac sp
   in

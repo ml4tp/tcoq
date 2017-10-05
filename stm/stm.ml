@@ -1745,7 +1745,7 @@ end = struct (* {{{ *)
   let vernac_interp ~solve ~abstract cancel nworkers safe_id id
     { indentation; verbose; loc; expr = e; strlen }
   =
-    print_string ("deh(vernac_interp)");
+    (* print_string ("deh(vernac_interp)"); *)
     let e, time, fail =
       let rec find ~time ~fail = function
         | VernacTime (_,e) -> find ~time:true ~fail e
@@ -2968,13 +2968,12 @@ let interp verb (loc,e) =
      (!Flags.async_proofs_mode = Flags.APoff &&
       !Flags.compilation_mode = Flags.BuildVo) then
     let vcs = VCS.backup () in
-    (*
     let print_goals =
       verb && match clas with
        | VtQuery _, _ -> false
        | (VtProofStep _ | VtStm (VtBack _, _) | VtStartProof _), _ -> true
        | _ -> not !Flags.coqtop_ui in
-    *)
+    (*
     let print_goals =
       match clas with
        | VtQuery _, _ -> false
@@ -2982,6 +2981,7 @@ let interp verb (loc,e) =
        | _ -> not !Flags.coqtop_ui 
     in
     print_string (Printf.sprintf "deh(print_goals: %b?)" print_goals);
+    *)
     try finish ~print_goals ()
     with e ->
       let e = CErrors.push e in

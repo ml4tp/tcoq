@@ -286,10 +286,26 @@ let constr_of_id env id =
 
 (** Generic arguments : table of interpretation functions *)
 
+let deh_print_tactic call =
+  let name = Profile_ltac.string_of_call (snd call) in
+  Proofview.Goal.enter { enter = begin fun gl ->
+    let env = Proofview.Goal.env gl in
+    let sigma = project gl in
+    let concl = Tacmach.New.pf_nf_concl gl in
+    let goal = pr_context_of env sigma ++ cut () ++
+               str "============================" ++ cut () ++
+               pr_goal_concl_style_env env sigma concl
+    in
+      print_string (Printf.sprintf "{Executing tactic: %s\n" name);
+      print_string (Pp.string_of_ppcmds (v 0 goal));
+      print_string ("}\n");
+      Proofview.tclUNIT ()
+  end }
+
 (* Some of the code further down depends on the fact that push_trace does not modify sigma (the evar map) *)
 let push_trace call ist = match TacStore.get ist.extra f_trace with
-| None -> Proofview.tclUNIT [call]
-| Some trace -> Proofview.tclUNIT (call :: trace)
+| None -> deh_print_tactic call >>= fun _ -> Proofview.tclUNIT [call]
+| Some trace -> deh_print_tactic call >>= fun _ -> Proofview.tclUNIT (call :: trace)
 
 let propagate_trace ist loc id v =
   let v = Value.normalize v in
@@ -1276,7 +1292,7 @@ let rec val_interp ist ?(appl=UnnamedAppl) (tac:glob_tactic_expr) : Val.t Ftacti
       
 
 and eval_tactic ist tac : unit Proofview.tactic = 
-  print_string ("deh(ltac/tacinterp.ml@eval_tactic2: " ^ deh_show_gen_tactic_expr deh_show_r_dispatch tac ^ ")\n");
+  (* print_string ("deh(ltac/tacinterp.ml@eval_tactic2: " ^ deh_show_gen_tactic_expr deh_show_r_dispatch tac ^ ")\n"); *)
   match tac with
   | TacAtom (loc,t) ->
       let call = LtacAtomCall t in
@@ -1366,13 +1382,13 @@ and eval_tactic ist tac : unit Proofview.tactic =
         let ist = {
           lfun = lfun;
           extra = TacStore.set ist.extra f_trace trace; } in
-        val_interp ist body >>= fun v ->
-        Ftactic.lift (tactic_of_value ist v)
+        val_interp ist body >>= (fun v ->
+        Ftactic.lift (tactic_of_value ist v))
       in
       let tac =
-        Ftactic.with_env interp_vars >>= fun (env, lr) ->
+        Ftactic.with_env interp_vars >>= (fun (env, lr) ->
         let name () = Pptactic.pr_alias (fun v -> print_top_val env v) 0 s lr in
-        Proofview.Trace.name_tactic name (tac lr)
+        Proofview.Trace.name_tactic name (tac lr))
       (* spiwack: this use of name_tactic is not robust to a
          change of implementation of [Ftactic]. In such a situation,
          some more elaborate solution will have to be used. *)
@@ -1385,7 +1401,6 @@ and eval_tactic ist tac : unit Proofview.tactic =
           expected " ++ int len1 ++ str ", found " ++ int len2)
       in
       Ftactic.run tac (fun () -> Proofview.tclUNIT ())
-
   | TacML (loc,opn,l) ->
       push_trace (loc,LtacMLCall tac) ist >>= fun trace ->
       let ist = { ist with extra = TacStore.set ist.extra f_trace trace; } in
@@ -1394,22 +1409,10 @@ and eval_tactic ist tac : unit Proofview.tactic =
       let tac args =
         let name () = Pptactic.pr_extend (fun v -> print_top_val () v) 0 opn args in
         Proofview.Trace.name_tactic name (catch_error_tac trace (tac args ist))
-      in
-      Proofview.Goal.enter { enter = begin fun gl ->
-        let env = Proofview.Goal.env gl in
-        let sigma = project gl in
-        let concl = Tacmach.New.pf_nf_concl gl in
-        let goal = pr_context_of env sigma ++ cut () ++
-                   str "============================" ++ cut () ++
-                   pr_goal_concl_style_env env sigma concl
-        in
-        print_string (Pp.string_of_ppcmds (v 0 goal));
-        Proofview.tclUNIT ()
-      end} >>= fun _ ->
+      in 
       Ftactic.run args tac
 
 and force_vrec ist v : Val.t Ftactic.t =
-  print_string ("deh(ltac/tacinterp.ml@force_vrec)\n");
   let v = Value.normalize v in
   if has_type v (topwit wit_tacvalue) then
     let v = to_tacvalue v in
@@ -1419,7 +1422,6 @@ and force_vrec ist v : Val.t Ftactic.t =
   else Ftactic.return v
 
 and interp_ltac_reference loc' mustbetac ist r : Val.t Ftactic.t =
-  print_string ("deh(ltac/tacinterp.ml@interp_ltac_ref)\n");
   match r with
   | ArgVar (loc,id) ->
       let v =
@@ -1442,7 +1444,7 @@ and interp_ltac_reference loc' mustbetac ist r : Val.t Ftactic.t =
       val_interp ~appl ist (Tacenv.interp_ltac r)
 
 and interp_tacarg ist arg : Val.t Ftactic.t =
-  print_string ("deh(ltac/tacinterp.ml@interp_tacarg: " ^ (deh_show_gen_tactic_arg deh_show_r_dispatch arg) ^ ")\n");
+  (* print_string ("deh(ltac/tacinterp.ml@interp_tacarg: " ^ (deh_show_gen_tactic_arg deh_show_r_dispatch arg) ^ ")\n"); *)
   match arg with
   | TacGeneric arg -> interp_genarg ist arg
   | Reference r -> interp_ltac_reference dloc false ist r
@@ -1483,7 +1485,6 @@ and interp_tacarg ist arg : Val.t Ftactic.t =
 
 (* Interprets an application node *)
 and interp_app loc ist fv largs : Val.t Ftactic.t =
-  print_string ("deh(ltac/tacinterp.ml@interp_app)\n");
   let (>>=) = Ftactic.bind in
   let fail = Tacticals.New.tclZEROMSG (str "Illegal tactic application.") in
   let fv = Value.normalize fv in
@@ -1547,7 +1548,6 @@ and tactic_of_value ist vle =
 
 (* Interprets the clauses of a recursive LetIn *)
 and interp_letrec ist llc u =
-  print_string ("deh(ltac/tacinterp.ml@interp_letrec)\n");
   Proofview.tclUNIT () >>= fun () -> (* delay for the effects of [lref], just in case. *)
   let lref = ref ist.lfun in
   let fold accu ((_, id), b) =
@@ -1561,7 +1561,6 @@ and interp_letrec ist llc u =
 
 (* Interprets the clauses of a LetIn *)
 and interp_letin ist llc u =
-  print_string ("deh(ltac/tacinterp.ml@interp_letin)\n");
   let rec fold lfun = function
   | [] ->
     let ist = { ist with lfun } in
@@ -1575,7 +1574,6 @@ and interp_letin ist llc u =
 (** [interp_match_success lz ist succ] interprets a single matching success
     (of type {!Tactic_matching.t}). *)
 and interp_match_success ist { Tactic_matching.subst ; context ; terms ; lhs } =
-  print_string ("deh(ltac/tacinterp.ml@interp_match_success)\n");
   let (>>=) = Ftactic.bind in
   let lctxt = Id.Map.map interp_context context in
   let hyp_subst = Id.Map.map Value.of_constr terms in
@@ -1599,7 +1597,6 @@ and interp_match_success ist { Tactic_matching.subst ; context ; terms ; lhs } =
     first success is considered, otherwise further successes are tried
     if the left-hand side fails. *)
 and interp_match_successes lz ist s =
-   print_string ("deh(ltac/tacinterp.ml@interp_match_successes)\n");
    let general =
      let break (e, info) = match e with
        | FailError (0, _) -> None
@@ -1623,7 +1620,6 @@ and interp_match_successes lz ist s =
 
 (* Interprets the Match expressions *)
 and interp_match ist lz constr lmr =
-  print_string ("deh(ltac/tacinterp.ml@interp_match)\n");
   let (>>=) = Ftactic.bind in
   begin Proofview.tclORELSE
     (interp_ltac_constr ist constr)
@@ -1643,7 +1639,6 @@ and interp_match ist lz constr lmr =
 
 (* Interprets the Match Context expressions *)
 and interp_match_goal ist lz lr lmr =
-    print_string ("deh(ltac/tacinterp.ml@interp_match_goal)\n");
     Ftactic.nf_enter { enter = begin fun gl ->
       let sigma = project gl in
       let env = Proofview.Goal.env gl in
@@ -1656,7 +1651,6 @@ and interp_match_goal ist lz lr lmr =
 
 (* Interprets extended tactic generic arguments *)
 and interp_genarg ist x : Val.t Ftactic.t =
-    print_string ("deh(ltac/tacinterp.ml@interp_genarg)\n");
     let open Ftactic.Notations in
     (** Ad-hoc handling of some types. *)
     let tag = genarg_tag x in
@@ -1690,7 +1684,6 @@ and interp_genarg ist x : Val.t Ftactic.t =
     independently of goals. *)
 
 and interp_genarg_constr_list ist x =
-  print_string ("deh(ltac/tacinterp.ml@interp_genarg_constr_list)\n");
   Ftactic.nf_s_enter { s_enter = begin fun gl ->
   let env = Proofview.Goal.env gl in
   let sigma = Sigma.to_evar_map (Proofview.Goal.sigma gl) in
@@ -1701,7 +1694,6 @@ and interp_genarg_constr_list ist x =
   end }
 
 and interp_genarg_var_list ist x =
-  print_string ("deh(ltac/tacinterp.ml@interp_genarg_var_list)\n");
   Ftactic.enter { enter = begin fun gl ->
   let env = Proofview.Goal.env gl in
   let sigma = Sigma.to_evar_map (Proofview.Goal.sigma gl) in
@@ -1713,7 +1705,6 @@ and interp_genarg_var_list ist x =
 
 (* Interprets tactic expressions : returns a "constr" *)
 and interp_ltac_constr ist e : constr Ftactic.t =
-  print_string ("deh(ltac/tacinterp.ml@interp_ltac_constr)\n");
   let (>>=) = Ftactic.bind in
   begin Proofview.tclORELSE
       (val_interp ist e)
@@ -1767,8 +1758,7 @@ and name_atomic ?env tacexpr tac : unit Proofview.tactic =
 
 (* Interprets a primitive tactic *)
 and interp_atomic ist tac : unit Proofview.tactic =
-  print_string ("deh(ltac/tacinterp.ml@interp_atomic: " ^ deh_show_gen_atomic_tactic_expr tac ^ ")\n");
-  (* Feedback.msg_info (str (deh_show_tac tac)); *)
+  (* print_string ("deh(ltac/tacinterp.ml@interp_atomic: " ^ deh_show_gen_atomic_tactic_expr tac ^ ")\n"); *)
   match tac with
   (* Basic tactics *)
   | TacIntroPattern (ev,l) ->
@@ -2019,14 +2009,6 @@ and interp_atomic ist tac : unit Proofview.tactic =
 	  (b,m,keep,f)) l in
         let env = Proofview.Goal.env gl in
         let sigma = project gl in
-        (* deh(print_string (Pp.string_of_ppcmds (default_printer_pr.pr_goal gl));) *)
-        (* print_string (Pp.string_of_ppcmds (default_printer_pr.pr_goal gl)); *)
-        let concl = Tacmach.New.pf_nf_concl gl in
-        let goal = pr_context_of env sigma ++ cut () ++
-                   str "============================" ++ cut () ++
-                   pr_goal_concl_style_env env sigma concl
-        in
-        print_string (Pp.string_of_ppcmds goal);
         let cl = interp_clause ist env sigma cl in
         name_atomic ~env
           (TacRewrite (ev,l,cl,Option.map ignore by))
@@ -2087,7 +2069,7 @@ let default_ist () =
 
 let eval_tactic t =
   (* deh(t: Tacexpr.glob_tactic_expr = Tacexpr.g_dispatch Tacexpr.gen_tactic_expr) *)
-  print_string ("deh(ltac/tacinterp.ml@eval_tactic: " ^ deh_show_gen_tactic_expr deh_show_r_dispatch t ^ ")\n");
+  (* print_string ("deh(ltac/tacinterp.ml@eval_tactic: " ^ deh_show_gen_tactic_expr deh_show_r_dispatch t ^ ")\n"); *)
   Proofview.tclUNIT () >>= fun () -> (* delay for [default_ist] *)
   Proofview.tclLIFT db_initialize <*>
   interp_tactic (default_ist ()) t
