@@ -129,7 +129,7 @@ let solve ?with_end_tac gi info_lvl tac pr =
       | Vernacexpr.SelectNth i -> Proofview.tclFOCUS i i tac
       | Vernacexpr.SelectList l -> Proofview.tclFOCUSLIST l tac
       | Vernacexpr.SelectId id -> Proofview.tclFOCUSID id tac
-      | Vernacexpr.SelectAll -> tac
+      | Vernacexpr.SelectAll -> print_string "SELECTING ALL\n"; tac
     in
     let tac =
       if use_unification_heuristics () then

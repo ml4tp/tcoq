@@ -2548,10 +2548,10 @@ let deh_show_vernac_expr ve =
 
 let rec deh_show_vernac_type vt =
   match vt with
-  | VtStartProof (_) -> "VtStartProof"
+  | VtStartProof (name, _, names) -> Printf.sprintf "VtStartProof(%s)" name
   | VtSideff (_) -> "VtSideff"
   | VtQed (_) -> "VtQed"
-  | VtProofStep (_) -> "VtProofStep"
+  | VtProofStep _ -> "VtProofStep"
   | VtProofMode (_) -> "VtProofMode"
   | VtQuery (_, _) -> "VtQuery"
   | VtStm (_, _) -> "VtStm"
