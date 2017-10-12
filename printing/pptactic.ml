@@ -579,7 +579,7 @@ module Make
       spc() ++ prc c ++ pr_as_ipat prdc ipat
 
   let pr_by_tactic prt = function
-    | Some tac -> keyword "by" ++ spc () ++ prt tac
+    | Some tac -> spc () ++ str "(" ++ keyword "by" ++ spc () ++ prt tac ++ str ")"
     | None -> mt()
 
   let pr_hyp_location pr_id = function

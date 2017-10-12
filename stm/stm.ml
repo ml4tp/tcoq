@@ -2546,9 +2546,18 @@ let deh_show_vernac_expr ve =
   | VernacPolymorphic _ -> "VernacPolymorphic"
   | VernacLocal _ -> "VernacLocal"
 
+let rec deh_show_ls sep show_fn ls =
+  match ls with
+  | [] -> ""
+  | hd::[] -> show_fn hd
+  | hd::tl -> Printf.sprintf "%s%s%s" (show_fn hd) sep (deh_show_ls sep show_fn tl)
+
+let deh_show_names names =
+  deh_show_ls ", " Names.Id.to_string names
+
 let rec deh_show_vernac_type vt =
   match vt with
-  | VtStartProof (name, _, names) -> Printf.sprintf "VtStartProof(%s)" name
+  | VtStartProof (name, _, names) -> Printf.sprintf "VtStartProof(%s, %s)" name (deh_show_names names)
   | VtSideff (_) -> "VtSideff"
   | VtQed (_) -> "VtQed"
   | VtProofStep _ -> "VtProofStep"
@@ -2680,11 +2689,13 @@ let process_transaction ?(newtip=Stateid.fresh ()) ~tty
             match parallel with
             | `Yes(solve,abstract) -> `TacQueue (solve, abstract, ref false)
             | `No -> `MainQueue in
+          (*
           let deh_print_proof_block_name cblock = 
             match cblock with
             | Some x -> print_string x
             | None -> print_string "NONE"
           in
+          *)
           (* deh_print_proof_block_name cblock ; *)
           VCS.commit id (mkTransTac x cblock queue);
           (* Static proof block detection delayed until an error really occurs.

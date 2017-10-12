@@ -32,6 +32,18 @@ git push -u myrepo deh
 	/Users/dehuang/Documents/research/pnh/coq/build/share/texmf/text/latex/misc
 	```
 
+	
+	```
+	/home/dehuang/research/pnh/coq/build/bin
+	/home/dehuang/research/pnh/coq/build/lib/coq
+	/home/dehuang/research/pnh/coq/build/extra
+	/home/dehuang/research/pnh/coq/build/share/coq
+	/home/dehuang/research/pnh/coq/build/share/man
+	/home/dehuang/research/pnh/coq/build/share/doc/coq
+	/home/dehuang/research/pnh/coq/build/share/emacs/site-lisp
+	/home/dehuang/research/pnh/coq/build/share/texmf/text/latex/misc
+	```
+
 3. Make the modified `coq`. The binaries are currently configured to be installed to `~/Documents/research/pnh/coq/build/bin`.
 
     ```
