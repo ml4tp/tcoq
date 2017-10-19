@@ -7,8 +7,14 @@
 git remote add origin ssh://git@bitbucket.org/dan-e-huang/coq.git
 ```
 
+Push to my version
 ```
 git push myrepo deh:master
+```
+
+Push to prafulla
+```
+git push share deh:master
 ```
 
 # Instructions

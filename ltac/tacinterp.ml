@@ -335,10 +335,8 @@ let deh_print_tactic mode (call : Loc.t * ltac_call_kind) extra =
       print_string "begin(tacst)\n";
       print_string (Printf.sprintf "%s {!} %s {!} %s {!} %s {!} %d {!} %d {!} %s" mode name lck full_tac gid numgoals foobar);
       (* print_string (Printf.sprintf "{%s, tac: %s, kind: %s, ftac: %s, gid: %d, ngs: %d\n" mode name lck full_tac gid numgoals); *)
-      (*
       print_string (Pp.string_of_ppcmds (v 0 goal));
       print_string "\n";
-      *)
       print_string "end(tacst)\n";
       Proofview.tclUNIT ()
   end }
