@@ -8,7 +8,7 @@ git remote add origin ssh://git@bitbucket.org/dan-e-huang/coq.git
 ```
 
 ```
-git push -u myrepo deh
+git push myrepo deh:master
 ```
 
 # Instructions
