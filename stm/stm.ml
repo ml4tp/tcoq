@@ -1745,7 +1745,6 @@ end = struct (* {{{ *)
   let vernac_interp ~solve ~abstract cancel nworkers safe_id id
     { indentation; verbose; loc; expr = e; strlen }
   =
-    (* print_string ("deh(vernac_interp)"); *)
     let e, time, fail =
       let rec find ~time ~fail = function
         | VernacTime (_,e) -> find ~time:true ~fail e
@@ -2426,6 +2425,7 @@ let snapshot_vio ldir long_f_dot_vo =
 
 let reset_task_queue = Slaves.reset_task_queue
 
+(*
 let deh_show_vernac_expr ve =
   match ve with
   | VernacLoad (_, _) -> (* verbose_flag * string *) "VernacLoad(?, ?)"
@@ -2545,6 +2545,7 @@ let deh_show_vernac_expr ve =
   | VernacProgram _ -> "VernacProgram"
   | VernacPolymorphic _ -> "VernacPolymorphic"
   | VernacLocal _ -> "VernacLocal"
+*)
 
 let rec deh_show_ls sep show_fn ls =
   match ls with
@@ -2555,6 +2556,7 @@ let rec deh_show_ls sep show_fn ls =
 let deh_show_names names =
   deh_show_ls ", " Names.Id.to_string names
 
+(*
 let rec deh_show_vernac_type vt =
   match vt with
   | VtStartProof (name, _, names) -> Printf.sprintf "VtStartProof(%s, %s)" name (deh_show_names names)
@@ -2565,6 +2567,26 @@ let rec deh_show_vernac_type vt =
   | VtQuery (_, _) -> "VtQuery"
   | VtStm (_, _) -> "VtStm"
   | VtUnknown -> "VtUnknown"
+*)
+
+let rec deh_show_vernac_typ_exp vt ve =
+  match vt with
+  | VtStartProof (name, _, names) -> 
+      Printer.deh_counter := 0; 
+      Printf.sprintf "begin(pf) {!} %s {!} %s\n" name (deh_show_names names)
+  | VtSideff _ -> ""
+  | VtQed _ -> "end(pf)\n"
+  | VtProofStep _ ->
+    begin
+      match ve with
+      | VernacSubproof _ -> "begin(subpf)\n"
+      | VernacEndSubproof -> "end(subpf)\n"
+      | _ -> "" 
+    end
+  | VtProofMode _ -> ""
+  | VtQuery (_, _) -> ""
+  | VtStm (_, _) -> ""
+  | VtUnknown -> ""
 
 (* Document building *)
 let process_transaction ?(newtip=Stateid.fresh ()) ~tty
@@ -2578,7 +2600,8 @@ let process_transaction ?(newtip=Stateid.fresh ()) ~tty
       prerr_endline (fun () ->
         "  classified as: " ^ string_of_vernac_classification c);
       let (vt, vw) = c in
-      print_string ("deh(@process_transaction; vernac_type: " ^ deh_show_vernac_type vt ^ "; vernac_expr: " ^ deh_show_vernac_expr expr ^ ")\n");
+      (* print_string ("deh(@process_transaction; vernac_type: " ^ deh_show_vernac_type vt ^ "; vernac_expr: " ^ deh_show_vernac_expr expr ^ ")\n"); *)
+      print_string (deh_show_vernac_typ_exp vt expr);
       match c with
       (* PG stuff *)    
       | VtStm(VtPG,false), VtNow -> vernac_interp Stateid.dummy x; `Ok
@@ -2689,14 +2712,6 @@ let process_transaction ?(newtip=Stateid.fresh ()) ~tty
             match parallel with
             | `Yes(solve,abstract) -> `TacQueue (solve, abstract, ref false)
             | `No -> `MainQueue in
-          (*
-          let deh_print_proof_block_name cblock = 
-            match cblock with
-            | Some x -> print_string x
-            | None -> print_string "NONE"
-          in
-          *)
-          (* deh_print_proof_block_name cblock ; *)
           VCS.commit id (mkTransTac x cblock queue);
           (* Static proof block detection delayed until an error really occurs.
              If/when and UI will make something useful with this piece of info,
@@ -2984,15 +2999,6 @@ let interp verb (loc,e) =
        | VtQuery _, _ -> false
        | (VtProofStep _ | VtStm (VtBack _, _) | VtStartProof _), _ -> true
        | _ -> not !Flags.coqtop_ui in
-    (*
-    let print_goals =
-      match clas with
-       | VtQuery _, _ -> false
-       | (VtProofStep _ | VtStm (VtBack _, _) | VtStartProof _), _ -> true
-       | _ -> not !Flags.coqtop_ui 
-    in
-    print_string (Printf.sprintf "deh(print_goals: %b?)" print_goals);
-    *)
     try finish ~print_goals ()
     with e ->
       let e = CErrors.push e in

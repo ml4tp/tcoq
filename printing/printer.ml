@@ -282,6 +282,21 @@ let pr_rel_decl env sigma decl =
   | Anonymous -> hov 0 (str"<>" ++ spc () ++ pbody ++ str":" ++ spc () ++ ptyp)
   | Name id -> hov 0 (pr_id id ++ spc () ++ pbody ++ str":" ++ spc () ++ ptyp)
 
+let deh_pr_rel_decl env sigma decl =
+  let open Context.Rel.Declaration in
+  let na = get_name decl in
+  let typ = get_type decl in
+  let pbody = match decl with
+    | LocalAssum _ -> mt ()
+    | LocalDef (_,c,_) ->
+	(* Force evaluation *)
+	let pb = pr_lconstr_env env sigma c in
+	let pb = if isCast c then surround pb else pb in
+	(str":=" ++ spc () ++ pb ++ spc ()) in
+  let ptyp = pr_ltype_env env sigma typ in
+  match na with
+  | Anonymous -> h 0 (str"<>" ++ spc () ++ pbody ++ str":" ++ spc () ++ ptyp)
+  | Name id -> h 0 (pr_id id ++ spc () ++ pbody ++ str":" ++ spc () ++ ptyp)
 
 (* Prints out an "env" in a nice format.  We print out the
  * signature,then a horizontal bar, then the debruijn environment.
@@ -317,6 +332,22 @@ let pr_context_unlimited env sigma =
     fold_rel_context
       (fun env d pps ->
          let pnat = pr_rel_decl env sigma d in (pps ++ fnl () ++ pnat))
+      env ~init:(mt ())
+  in
+  (sign_env ++ db_env)
+
+let deh_pr_context_unlimited env sigma =
+  let sign_env =
+    Context.NamedList.fold
+      (fun d pps ->
+         let pidt =  pr_var_list_decl env sigma d in
+         (pps ++ fnl () ++ pidt))
+      (Termops.compact_named_context (named_context env)) ~init:(mt ())
+  in
+  let db_env =
+    fold_rel_context
+      (fun env d pps ->
+         let pnat = deh_pr_rel_decl env sigma d in (pps ++ fnl () ++ pnat))
       env ~init:(mt ())
   in
   (sign_env ++ db_env)
@@ -359,6 +390,12 @@ let pr_context_limit n env sigma =
 let pr_context_of env sigma = match Flags.print_hyps_limit () with
   | None -> hv 0 (pr_context_unlimited env sigma)
   | Some n -> hv 0 (pr_context_limit n env sigma)
+
+let deh_pr_context_of env sigma = match Flags.print_hyps_limit () with
+  | None -> h 0 (deh_pr_context_unlimited env sigma)
+  | Some n -> h 0 (pr_context_limit n env sigma)
+
+let deh_counter = ref 0
 
 (* display goal parts (Proof mode) *)
 
