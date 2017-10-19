@@ -1394,7 +1394,9 @@ and eval_tactic ist tac : unit Proofview.tactic =
   | TacThen (t1,t) ->
       Tacticals.New.tclTHEN (interp_tactic ist t1) (interp_tactic ist t)
   | TacDispatch tl ->
-      Proofview.tclDISPATCH (List.map (interp_tactic ist) tl)
+      Proofview.tclDISPATCH (List.map (interp_tactic ist) tl) >>= fun result ->
+      print_string "AFTERDISPATCH";
+      Proofview.tclUNIT result
   | TacExtendTac (tf,t,tl) ->
       Proofview.tclEXTEND (Array.map_to_list (interp_tactic ist) tf)
                           (interp_tactic ist t)
