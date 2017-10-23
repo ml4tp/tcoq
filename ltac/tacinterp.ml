@@ -298,10 +298,19 @@ let deh_show_ltac_call_kind lck =
 let deh_show_evar ev =
   string_of_int (Evar.repr ev)
 
+let deh_counter_inc () =
+  let old = !deh_counter in
+  deh_counter := (!deh_counter) + 1;
+  old
+  
+let deh_counter_dec () =
+  deh_counter := (!deh_counter) - 1;
+  !deh_counter
+
 let deh_print_tactic mode (call : Loc.t * ltac_call_kind) extra =
   let name = Profile_ltac.string_of_call (snd call) in
   let loc = fst call in
-  let foobar = Printf.sprintf "(%s,%d,%d)" (loc.Loc.fname) (loc.Loc.bp) (loc.Loc.bp) in
+  let sloc = Printf.sprintf "(%s,%d,%d)" (loc.Loc.fname) (loc.Loc.bp) (loc.Loc.bp) in
   let lck = deh_show_ltac_call_kind (snd call) in
   Proofview.numgoals >>= fun numgoals ->
   (*
@@ -310,36 +319,32 @@ let deh_print_tactic mode (call : Loc.t * ltac_call_kind) extra =
     Proofview.tclUNIT ()
   end } >>= fun () ->
   *)
-  Proofview.Goal.enter { enter = begin fun gl ->
-    let env = Proofview.Goal.env gl in
-    let sigma = project gl in
-    let concl = Tacmach.New.pf_nf_concl gl in
-    let gid = Evar.repr (Proofview.Goal.goal (Proofview.Goal.assume gl)) in
-    let full_tac =
-      match extra with
-      | None -> ""
-      | Some tac -> Pp.string_of_ppcmds (Pptactic.pr_glob_tactic env tac)
-    in
-    (*
-    let _ = if mode == "before" then
-              let old = !deh_counter in
-              deh_counter := !deh_counter + 1;
-              old
-            else 0 
-    in
-    *)
-    let goal = pr_context_of env sigma ++ fnl () ++
-               str "============================" ++ fnl () ++
-               (pr_goal_concl_style_env env sigma concl)
-    in
-      print_string "begin(tacst)\n";
-      print_string (Printf.sprintf "%s {!} %s {!} %s {!} %s {!} %d {!} %d {!} %s" mode name lck full_tac gid numgoals foobar);
-      (* print_string (Printf.sprintf "{%s, tac: %s, kind: %s, ftac: %s, gid: %d, ngs: %d\n" mode name lck full_tac gid numgoals); *)
-      print_string (Pp.string_of_ppcmds (v 0 goal));
-      print_string "\n";
-      print_string "end(tacst)\n";
-      Proofview.tclUNIT ()
-  end }
+  let depth = if String.equal mode "before" then deh_counter_inc() else deh_counter_dec() in
+  print_string (Printf.sprintf "begin(tacst) {!} %d\n" depth);
+  print_string (Printf.sprintf "%s {!} %s {!} %s {!} %d {!} %s\n" mode name lck numgoals sloc);
+  if numgoals == 0 
+  then (print_string "end(tacst)\n"; Proofview.tclUNIT ())
+  else
+    Proofview.Goal.enter { enter = begin fun gl ->
+      let env = Proofview.Goal.env gl in
+      let sigma = project gl in
+      let concl = Tacmach.New.pf_nf_concl gl in
+      let gid = Evar.repr (Proofview.Goal.goal (Proofview.Goal.assume gl)) in
+      let full_tac =
+        match extra with
+        | None -> ""
+        | Some tac -> Pp.string_of_ppcmds (Pptactic.pr_glob_tactic env tac)
+      in
+      let goal = pr_context_of env sigma ++ fnl () ++
+                 str "============================" ++ fnl () ++
+                 (pr_goal_concl_style_env env sigma concl)
+      in
+        print_string (Printf.sprintf "%s {!} %d" full_tac gid);
+        print_string (Pp.string_of_ppcmds (v 0 goal));
+        print_string "\n";
+        print_string "end(tacst)\n";
+        Proofview.tclUNIT ()
+    end }
 
 (* Some of the code further down depends on the fact that push_trace does not modify sigma (the evar map) *)
 (*
@@ -1392,9 +1397,7 @@ and eval_tactic ist tac : unit Proofview.tactic =
   | TacThen (t1,t) ->
       Tacticals.New.tclTHEN (interp_tactic ist t1) (interp_tactic ist t)
   | TacDispatch tl ->
-      Proofview.tclDISPATCH (List.map (interp_tactic ist) tl) >>= fun result ->
-      print_string "AFTERDISPATCH";
-      Proofview.tclUNIT result
+      Proofview.tclDISPATCH (List.map (interp_tactic ist) tl)
   | TacExtendTac (tf,t,tl) ->
       Proofview.tclEXTEND (Array.map_to_list (interp_tactic ist) tf)
                           (interp_tactic ist t)
@@ -1458,7 +1461,6 @@ and eval_tactic ist tac : unit Proofview.tactic =
       in
       *)
       let tac =
-        (* Ftactic.lift print_tac_tac >>= (fun () -> *)
         Ftactic.with_env interp_vars >>= (fun (env, lr) ->
         let name () = Pptactic.pr_alias (fun v -> print_top_val env v) 0 s lr in        
         Proofview.Trace.name_tactic name (tac lr))
