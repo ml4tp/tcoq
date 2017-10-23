@@ -308,10 +308,15 @@ let deh_counter_dec () =
   !deh_counter
 
 let deh_print_tactic mode (call : Loc.t * ltac_call_kind) extra =
+  match snd call with
+  | LtacVarCall _ -> Proofview.tclUNIT ()
+  | LtacConstrInterp _ -> Proofview.tclUNIT ()
+  | _ ->
   let name = Profile_ltac.string_of_call (snd call) in
   let loc = fst call in
   let sloc = Printf.sprintf "(%s,%d,%d)" (loc.Loc.fname) (loc.Loc.bp) (loc.Loc.bp) in
   let lck = deh_show_ltac_call_kind (snd call) in
+  let depth = if String.equal mode "before" then deh_counter_inc() else deh_counter_dec() in
   Proofview.numgoals >>= fun numgoals ->
   (*
   Proofview.Goal.nf_enter { enter = begin fun gl -> 
@@ -319,11 +324,16 @@ let deh_print_tactic mode (call : Loc.t * ltac_call_kind) extra =
     Proofview.tclUNIT ()
   end } >>= fun () ->
   *)
-  let depth = if String.equal mode "before" then deh_counter_inc() else deh_counter_dec() in
-  print_string (Printf.sprintf "begin(tacst) {!} %d\n" depth);
-  print_string (Printf.sprintf "%s {!} %s {!} %s {!} %d {!} %s\n" mode name lck numgoals sloc);
+  (* TODO(deh): test num goals and print accordingly ... *)
+  (* print_string (Printf.sprintf "begin(tacst) {!} %d\n" depth); *)
+  (* print_string (Printf.sprintf "%s {!} %s {!} %s {!} %d {!} %s" mode name lck numgoals sloc); *)
   if numgoals == 0 
-  then (print_string "end(tacst)\n"; Proofview.tclUNIT ())
+  then (
+    print_string (Printf.sprintf "begin(tacst) {!} %d\n" depth);
+    print_string (Printf.sprintf "%s {!} %s {!} %s {!} %d {!} %s\n" mode name lck numgoals sloc);
+    print_string "end(tacst)\n";
+    Proofview.tclUNIT ()
+  )
   else
     Proofview.Goal.enter { enter = begin fun gl ->
       let env = Proofview.Goal.env gl in
@@ -339,7 +349,8 @@ let deh_print_tactic mode (call : Loc.t * ltac_call_kind) extra =
                  str "============================" ++ fnl () ++
                  (pr_goal_concl_style_env env sigma concl)
       in
-        print_string (Printf.sprintf " {!} %s {!} %d" full_tac gid);
+        print_string (Printf.sprintf "begin(tacst) {!} %d\n" depth);
+        print_string (Printf.sprintf "%s {!} %s {!} %s {!} %d {!} %s {!} %s {!} %d" mode name lck numgoals sloc full_tac gid);
         print_string (Pp.string_of_ppcmds (v 0 goal));
         print_string "\n";
         print_string "end(tacst)\n";
