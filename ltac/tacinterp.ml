@@ -339,7 +339,7 @@ let deh_print_tactic mode (call : Loc.t * ltac_call_kind) extra =
                  str "============================" ++ fnl () ++
                  (pr_goal_concl_style_env env sigma concl)
       in
-        print_string (Printf.sprintf "%s {!} %d" full_tac gid);
+        print_string (Printf.sprintf " {!} %s {!} %d" full_tac gid);
         print_string (Pp.string_of_ppcmds (v 0 goal));
         print_string "\n";
         print_string "end(tacst)\n";
