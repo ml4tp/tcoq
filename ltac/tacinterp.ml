@@ -1489,7 +1489,7 @@ and eval_tactic ist tac : unit Proofview.tactic =
       (* Ftactic.run tac (fun () -> deh_print_tactic "after" (loc, LtacNotationCall s) None) *)
       let open Proofview.Notations in
       (* Ftactic.run tac (fun () -> deh_print_tactic "afterD" (loc, LtacNotationCall s) None) >>= fun () -> *)
-      Ftactic.run tac (fun () -> Proofview.tclUNIT ()) <*> (* >>= fun () -> *)
+      Ftactic.run tac (fun () -> Proofview.tclUNIT ()) >>= fun () ->
       deh_print_tactic "after" (loc, LtacNotationCall s) None
       (* Ftactic.run tac (fun () -> Proofview.tclUNIT ()) *)
   | TacML (loc,opn,l) ->
