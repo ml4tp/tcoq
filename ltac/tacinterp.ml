@@ -328,7 +328,7 @@ let deh_print_tactic mode (call : Loc.t * ltac_call_kind) extra =
     if numgoals == 0 
     then (
       (* print_string (Printf.sprintf "begin(tacst) {!} %d\n" depth); *)
-      print_string (Printf.sprintf "%d\n" numgoals);
+      print_string ("ngs=0\n");
       print_string "end(tacst)\n";
       Proofview.tclUNIT ()
     )
