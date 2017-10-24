@@ -317,7 +317,7 @@ let deh_print_tactic mode (call : Loc.t * ltac_call_kind) extra =
     let sloc = Printf.sprintf "(%s,%d,%d)" (loc.Loc.fname) (loc.Loc.bp) (loc.Loc.ep) in
     let lck = deh_show_ltac_call_kind (snd call) in
     let depth = if String.equal mode "before" then deh_counter_inc() else deh_counter_dec() in
-    print_string (Printf.sprintf "DEH_PRINT_TACTIC %s %s\n" name sloc);
+    (* print_string (Printf.sprintf "DEH_PRINT_TACTIC %s %s\n" name sloc); *)
     Proofview.numgoals >>= fun numgoals ->
     (*
     Proofview.Goal.nf_enter { enter = begin fun gl -> 
