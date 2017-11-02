@@ -396,6 +396,9 @@ let deh_pr_context_of env sigma = match Flags.print_hyps_limit () with
   | Some n -> h 0 (pr_context_limit n env sigma)
 
 let deh_counter = ref 0
+let deh_counter2 = ref 0
+let deh_counter3 = ref 0
+let deh_counter4 = ref 0
 
 (* display goal parts (Proof mode) *)
 

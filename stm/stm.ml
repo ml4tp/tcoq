@@ -2573,6 +2573,9 @@ let rec deh_show_vernac_typ_exp vt ve =
   match vt with
   | VtStartProof (name, _, names) -> 
       Printer.deh_counter := 0; 
+      Printer.deh_counter2 := 0; 
+      Printer.deh_counter3 := 0; 
+      Printer.deh_counter4 := 0; 
       Printf.sprintf "begin(pf) {!} %s {!} %s\n" name (deh_show_names names)
   | VtSideff _ -> ""
   | VtQed _ -> "end(pf)\n"

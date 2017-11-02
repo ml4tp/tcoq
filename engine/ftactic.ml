@@ -31,9 +31,11 @@ let bind (type a) (type b) (m : a t) (f : a -> b t) : b t = m >>= function
         that the [m] argument was actually dependent. *)
     Proofview.Goal.goals >>= fun goals ->
     let ans = List.map (fun g -> (g,x)) goals in
+    (* Proofview.tclUNIT (print_string "DEH_SEP_1\n") >>= fun () -> *)
     Proofview.tclUNIT ans
   | Depends l ->
     Proofview.Goal.goals >>= fun goals ->
+    (* Proofview.tclUNIT (print_string "DEH_SEP_2\n") >>= fun () -> *)
     Proofview.tclUNIT (List.combine goals l)
   in
   (* After the tactic has run, some goals which were previously
@@ -45,8 +47,8 @@ let bind (type a) (type b) (m : a t) (f : a -> b t) : b t = m >>= function
   let filter (g,x) =
     g >>= fun g ->
     Proofview.Goal.unsolved g >>= function
-    | true -> Proofview.tclUNIT (Some x)
-    | false -> Proofview.tclUNIT None
+    | true -> (* Proofview.tclUNIT (print_string "DEH_SEP_3\n") <*> *) Proofview.tclUNIT (Some x)
+    | false -> (* Proofview.tclUNIT (print_string "DEH_SEP_4\n") <*> *) Proofview.tclUNIT None
   in
   Proofview.tclDISPATCHL (List.map f l) >>= fun l ->
   Proofview.Monad.List.map_filter filter (List.concat l) >>= fun filtered ->
