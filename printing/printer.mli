@@ -118,10 +118,6 @@ val pr_rel_context         : env -> evar_map -> Context.Rel.t -> std_ppcmds
 val pr_rel_context_of      : env -> evar_map -> std_ppcmds
 val pr_context_of          : env -> evar_map -> std_ppcmds
 val deh_pr_context_of      : env -> evar_map -> std_ppcmds
-val deh_counter            : int ref
-val deh_counter2           : int ref
-val deh_counter3           : int ref
-val deh_counter4           : int ref
 
 (** Predicates *)
 
