@@ -1636,11 +1636,14 @@ and tactic_of_value ist vle =
         lfun = lfun;
         extra = TacStore.set ist.extra f_trace []; } in
         let tac = name_if_glob appl (eval_tactic ist t) in
-        Profile_ltac.do_profile "tactic_of_value" trace (catch_error_tac trace tac) <*>
+        Profile_ltac.do_profile "tactic_of_value" trace (catch_error_tac trace tac) 
+        (*
+        <*>
         Proofview.Goal.enter { enter = begin fun gl ->
           let env = Proofview.Goal.env gl in
           Proofview.tclUNIT (print_string (Printf.sprintf "AfterHOHOHO(%s, %s)\n" (Names.string_of_id n2) (string_of_ppcmds (Pptactic.pr_glob_tactic env t))))
         end }
+        *)
       else Tacticals.New.tclZEROMSG (str "A fully applied tactic is expected.")
   | (VFun _|VRec _) -> Tacticals.New.tclZEROMSG (str "A fully applied tactic is expected.")
   else if has_type vle (topwit wit_tactic) then

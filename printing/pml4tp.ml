@@ -139,7 +139,7 @@ let rec share_constr c =
   | Lambda (name, t, c) -> 
       let idx1 = (share_constr t) in
       let idx2 = (share_constr c) in 
-      add_constrM idx (Printf.sprintf "L %s %d %d)" (deh_show_name name) idx1 idx2)
+      add_constrM idx (Printf.sprintf "L %s %d %d" (deh_show_name name) idx1 idx2)
   | LetIn (name, c1, t, c2) ->
       let idx1 = (share_constr c1) in
       let idx2 = (share_constr t) in  
@@ -174,16 +174,16 @@ let rec share_constr c =
 and share_constrs cs =
   deh_show_arr (fun c -> string_of_int (share_constr c)) " " cs
 and share_universe_instance ui =
-  deh_show_arr Univ.Level.to_string ", " (Univ.Instance.to_array ui)
+  deh_show_arr Univ.Level.to_string " " (Univ.Instance.to_array ui)
 and share_inductive (mutind, i) =
   (Names.MutInd.to_string mutind, i)
 and share_prec_declaration (names, types, constrs) =
-  let names' = deh_show_arr deh_show_name ", " names in
+  let names' = deh_show_arr deh_show_name " " names in
   let types' = share_constrs types in
   let constrs' = share_constrs constrs in
   (names', types', constrs')
 and share_int_arr iarr =
-  deh_show_arr string_of_int ", " iarr
+  deh_show_arr string_of_int " " iarr
 and share_case_info ci =
   Printf.sprintf "%s, %d, %s, %s)" (deh_show_inductive ci.ci_ind) (ci.ci_npar) (share_int_arr ci.ci_cstr_ndecls) (share_int_arr ci.ci_cstr_nargs)
 

@@ -2439,12 +2439,12 @@ let rec deh_show_vernac_typ_exp vt ve =
       Printf.sprintf "begin(pf) {!} %s {!} %s\n" name (Pml4tp.deh_show_ls Names.Id.to_string ", " names)
   | VtSideff _ -> ""
   | VtQed _ -> 
-      print_string "Constrs\n";
-      Pml4tp.deh_print_lowconstrM ();
       print_string "Typs\n";
       Pml4tp.deh_print_typM ();
       print_string "Bods\n";
       Pml4tp.deh_print_constrM ();
+      print_string "Constrs\n";
+      Pml4tp.deh_print_lowconstrM ();
       "end(pf)\n"
   | VtProofStep _ ->
     begin
