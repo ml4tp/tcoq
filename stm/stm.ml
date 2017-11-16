@@ -2435,8 +2435,9 @@ let rec deh_show_vernac_typ_exp vt ve =
       Pml4tp.deh_clear_typM ();
       Pml4tp.deh_clear_constrM ();
       Pml4tp.deh_clear_shareM ();
+      Pml4tp.deh_clear_goalM ();
       Pml4tp.deh_clear_lowconstrM ();
-      Printf.sprintf "begin(pf) {!} %s {!} %s\n" name (Pml4tp.deh_show_ls Names.Id.to_string ", " names)
+      Printf.sprintf "bg(pf) {!} %s {!} %s\n" name (Pml4tp.deh_show_ls Names.Id.to_string ", " names)
   | VtSideff _ -> ""
   | VtQed _ -> 
       print_string "Typs\n";
@@ -2445,12 +2446,18 @@ let rec deh_show_vernac_typ_exp vt ve =
       Pml4tp.deh_print_constrM ();
       print_string "Constrs\n";
       Pml4tp.deh_print_lowconstrM ();
-      "end(pf)\n"
+      print_string "PrTyps\n";
+      Pml4tp.deh_pr_typM ();
+      print_string "PrBods\n";
+      Pml4tp.deh_pr_constrM ();
+      print_string "PrGls\n";
+      Pml4tp.deh_pr_goalM ();
+      "en(pf)\n"
   | VtProofStep _ ->
     begin
       match ve with
-      | VernacSubproof _ -> "begin(subpf)\n"
-      | VernacEndSubproof -> "end(subpf)\n"
+      | VernacSubproof _ -> "bg(spf)\n"
+      | VernacEndSubproof -> "en(spf)\n"
       | _ -> "" 
     end
   | VtProofMode _ -> ""

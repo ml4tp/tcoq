@@ -7,11 +7,8 @@ open Printer
 (* Kludge counters *)
 
 let deh_counter = ref 0
-
 let deh_counter2 = ref 0
-
 let deh_counter3 = ref 0
-
 let deh_counter4 = ref 0
 
 let deh_counter_inc () =
@@ -52,45 +49,8 @@ let deh_show_name name =
 let deh_show_evar ev =
   Evar.repr ev
 
-let rec deh_show_constr c =
-  match kind_of_term c with
-  | Rel i -> Printf.sprintf "R(%d)" i
-  | Var id -> Printf.sprintf "V(%s)" (string_of_id id)
-  | Meta mv -> Printf.sprintf "M(%d)" mv
-  | Evar (exk, cs) -> Printf.sprintf "E(%d, (%s))" (deh_show_evar exk) (deh_show_arr deh_show_constr ", " cs)
-  | Sort sort -> Printf.sprintf "S(%s)" (string_of_ppcmds (Univ.Universe.pr (Sorts.univ_of_sort sort)))
-  | Cast (c, ck, t) -> Printf.sprintf "CA(%s, %s, %s)" (deh_show_constr c) (deh_show_cast_kind ck) (deh_show_constr t)
-  | Prod (name, t1, t2) -> Printf.sprintf "P(%s, %s, %s)" (deh_show_name name) (deh_show_constr t1) (deh_show_constr t2)
-  | Lambda (name, t, c) -> Printf.sprintf "L(%s, %s, %s)" (deh_show_name name) (deh_show_constr t) (deh_show_constr c)
-  | LetIn (name, c1, t, c2) -> Printf.sprintf "LI(%s, %s, %s, %s)" (deh_show_name name) (deh_show_constr c1) (deh_show_constr t) (deh_show_constr c2)
-  | App (c, cs) -> Printf.sprintf "A(%s, (%s))" (deh_show_constr c) (deh_show_arr deh_show_constr ", " cs)
-  | Const (const, ui) -> Printf.sprintf "C(%s, (%s))" (Names.Constant.to_string const) (deh_show_universe_instance ui)
-  | Ind (ind, ui) -> Printf.sprintf "I(%s, (%s))" (deh_show_inductive ind) (deh_show_universe_instance ui)
-  | Construct ((ind, j), ui) -> Printf.sprintf "CO((%s, %d), (%s))" (deh_show_inductive ind) j (deh_show_universe_instance ui)
-  | Case (ci, c1, c2, cs) -> Printf.sprintf "CS(%s, %s, %s, %s)" (deh_show_case_info ci) (deh_show_constr c1) (deh_show_constr c2) (deh_show_arr deh_show_constr ", " cs)
-  | Fix ((iarr, i), pc) -> Printf.sprintf "F((%s, %d), %s)" (deh_show_int_arr iarr) i (deh_show_prec_declaration pc)
-  | CoFix (i, pc) -> Printf.sprintf "CF(%d, %s)" i (deh_show_prec_declaration pc)
-  | Proj (proj, c) -> Printf.sprintf "PJ(%s, %s)" (Names.Projection.to_string proj) (deh_show_constr c)
-and deh_show_cast_kind ck =
-  match ck with
-  | VMcast -> "V"
-  | NATIVEcast -> "N"
-  | DEFAULTcast -> "D"
-  | REVERTcast -> "R"
-and deh_show_universe_instance ui =
-  deh_show_arr Univ.Level.to_string ", " (Univ.Instance.to_array ui)
-and deh_show_prec_declaration (names, types, constrs) =
-  let names' = deh_show_arr deh_show_name ", " names in
-  let types' = deh_show_arr deh_show_constr ", " types in
-  let constrs' = deh_show_arr deh_show_constr ", " constrs in
-  Printf.sprintf "((%s), (%s), (%s))" names' types' constrs'
-and deh_show_inductive (mutind, i) =
-  Printf.sprintf "(%s, %d)" (Names.MutInd.to_string mutind) i
-and deh_show_int_arr iarr =
-  deh_show_arr string_of_int ", " iarr
-and deh_show_case_info ci =
-  Printf.sprintf "(%s, %d, %s, %s)" (deh_show_inductive ci.ci_ind) (ci.ci_npar) (deh_show_int_arr ci.ci_cstr_ndecls) (deh_show_int_arr ci.ci_cstr_nargs)
 
+(* Shared data-structure utility *)
 
 module ConstrHash =
   struct
@@ -118,6 +78,9 @@ let add_constrM k v =
   deh_lowconstrM := IntMap.add k v !deh_lowconstrM;
   k
 
+
+(* Show shared data-structure *)
+
 let rec share_constr c =
   let idx = lookup_shareM c in
   match kind_of_term c with
@@ -131,7 +94,7 @@ let rec share_constr c =
   | Cast (c, ck, t) ->
       let idx1 = share_constr c in
       let idx2 = share_constr t in
-      add_constrM idx (Printf.sprintf "CA %d %s %d" idx1 (deh_show_cast_kind ck) idx2)
+      add_constrM idx (Printf.sprintf "CA %d %s %d" idx1 (share_cast_kind ck) idx2)
   | Prod (name, t1, t2) ->
       let idx1 = share_constr t1 in
       let idx2 = share_constr t2 in
@@ -173,6 +136,12 @@ let rec share_constr c =
       add_constrM idx (Printf.sprintf "PJ %s %d" (Names.Projection.to_string proj) idx1)
 and share_constrs cs =
   deh_show_arr (fun c -> string_of_int (share_constr c)) " " cs
+and share_cast_kind ck =
+  match ck with
+  | VMcast -> "V"
+  | NATIVEcast -> "N"
+  | DEFAULTcast -> "D"
+  | REVERTcast -> "R"
 and share_universe_instance ui =
   deh_show_arr Univ.Level.to_string " " (Univ.Instance.to_array ui)
 and share_inductive (mutind, i) =
@@ -185,14 +154,24 @@ and share_prec_declaration (names, types, constrs) =
 and share_int_arr iarr =
   deh_show_arr string_of_int " " iarr
 and share_case_info ci =
-  Printf.sprintf "%s, %d, %s, %s)" (deh_show_inductive ci.ci_ind) (ci.ci_npar) (share_int_arr ci.ci_cstr_ndecls) (share_int_arr ci.ci_cstr_nargs)
+  let (mutind, i) = share_inductive ci.ci_ind in
+  Printf.sprintf "%s %d %d %s %s" mutind i (ci.ci_npar) (share_int_arr ci.ci_cstr_ndecls) (share_int_arr ci.ci_cstr_nargs)
 
-(* Type and expression contexts *)
+
+(* Showing type and expression contexts *)
 
 let deh_typM = ref Names.Id.Map.empty
 let deh_constrM = ref Names.Id.Map.empty
+let deh_goalM = ref IntMap.empty
 let deh_clear_typM () = deh_typM := Names.Id.Map.empty
 let deh_clear_constrM () = deh_constrM := Names.Id.Map.empty
+let deh_clear_goalM () = deh_goalM := IntMap.empty
+
+let replace input output =
+  Str.global_replace (Str.regexp_string input) output
+
+let deh_pp2str pp =
+  replace "\n" " " (string_of_ppcmds (h 0 pp))
 
 let deh_add_body c id =
   match c with
@@ -203,8 +182,15 @@ let deh_add_typ typ id =
   deh_typM := Names.Id.Map.add id typ !deh_typM
 
 let deh_update_var_list_decl env sigma (l, c, typ) =
-  List.iter (deh_add_body c) l;
-  List.iter (deh_add_typ typ) l;
+  let pbody = match c with
+    | None -> None
+    | Some c ->
+        let pb = pr_lconstr_env env sigma c in
+        let pb = if isCast c then surround pb else pb in
+        Some (c, deh_pp2str pb)
+  in
+  List.iter (deh_add_body pbody) l;
+  List.iter (deh_add_typ (typ, deh_pp2str (pr_ltype_env env sigma typ))) l;
   l
 
 let deh_update_rel_decl env sigma decl =
@@ -221,9 +207,12 @@ let deh_update_rel_decl env sigma decl =
   let _ = 
     match decl with
     | LocalAssum _ -> ()
-    | LocalDef (_, c, _) -> deh_add_body (Some c) id 
+    | LocalDef (_, c, _) ->
+        let pb = pr_lconstr_env env sigma c in
+        let pb = if isCast c then surround pb else pb in
+        deh_add_body (Some (c, deh_pp2str pb)) id 
   in
-  (id, deh_add_typ typ id)
+  (id, deh_add_typ (typ, deh_pp2str (pr_ltype_env env sigma typ)) id)
 
 let deh_update_context env sigma =
   let named_ids =
@@ -237,16 +226,31 @@ let deh_update_context env sigma =
       env ~init:[]
   in named_ids @ rel_ids
 
+let deh_add_goal cid env sigma concl =
+  deh_goalM := IntMap.add cid (deh_pp2str (pr_goal_concl_style_env env sigma concl)) !deh_goalM
+
+
+(* Printing contexts *)
+
 let deh_print_typM () =
-  Names.Id.Map.iter (fun k v -> print_string (Printf.sprintf "%s: %d\n" (Names.Id.to_string k) (share_constr v))) !deh_typM
+  Names.Id.Map.iter (fun k (v, _) -> print_string (Printf.sprintf "%s: %d\n" (Names.Id.to_string k) (share_constr v))) !deh_typM
 
 let deh_print_constrM () =
-  Names.Id.Map.iter (fun k v -> print_string (Printf.sprintf "%s: %d\n" (Names.Id.to_string k) (share_constr v))) !deh_constrM
+  Names.Id.Map.iter (fun k (v, _) -> print_string (Printf.sprintf "%s: %d\n" (Names.Id.to_string k) (share_constr v))) !deh_constrM
 
 let deh_print_lowconstrM () = 
   IntMap.iter (fun k v -> print_string (Printf.sprintf "%d: %s\n" k v)) !deh_lowconstrM
 
-(* Goal contexts *)
+let deh_pr_typM () =
+  Names.Id.Map.iter (fun k (_, str) -> print_string (Printf.sprintf "%s: %s\n" (Names.Id.to_string k) str)) !deh_typM
+
+let deh_pr_constrM () =
+  Names.Id.Map.iter (fun k (_, str) -> print_string (Printf.sprintf "%s: %s\n" (Names.Id.to_string k) str)) !deh_constrM
+
+let deh_pr_goalM () = 
+  IntMap.iter (fun k v -> print_string (Printf.sprintf "%d: %s\n" k v)) !deh_goalM
+
+
 
 
 
@@ -451,4 +455,46 @@ let deh_show_context env sigma =
       env ~init:("")
   in
   (sign_env ^ db_env)
+*)
+
+
+(*
+let rec deh_show_constr c =
+  match kind_of_term c with
+  | Rel i -> Printf.sprintf "R(%d)" i
+  | Var id -> Printf.sprintf "V(%s)" (string_of_id id)
+  | Meta mv -> Printf.sprintf "M(%d)" mv
+  | Evar (exk, cs) -> Printf.sprintf "E(%d, (%s))" (deh_show_evar exk) (deh_show_arr deh_show_constr ", " cs)
+  | Sort sort -> Printf.sprintf "S(%s)" (string_of_ppcmds (Univ.Universe.pr (Sorts.univ_of_sort sort)))
+  | Cast (c, ck, t) -> Printf.sprintf "CA(%s, %s, %s)" (deh_show_constr c) (deh_show_cast_kind ck) (deh_show_constr t)
+  | Prod (name, t1, t2) -> Printf.sprintf "P(%s, %s, %s)" (deh_show_name name) (deh_show_constr t1) (deh_show_constr t2)
+  | Lambda (name, t, c) -> Printf.sprintf "L(%s, %s, %s)" (deh_show_name name) (deh_show_constr t) (deh_show_constr c)
+  | LetIn (name, c1, t, c2) -> Printf.sprintf "LI(%s, %s, %s, %s)" (deh_show_name name) (deh_show_constr c1) (deh_show_constr t) (deh_show_constr c2)
+  | App (c, cs) -> Printf.sprintf "A(%s, (%s))" (deh_show_constr c) (deh_show_arr deh_show_constr ", " cs)
+  | Const (const, ui) -> Printf.sprintf "C(%s, (%s))" (Names.Constant.to_string const) (deh_show_universe_instance ui)
+  | Ind (ind, ui) -> Printf.sprintf "I(%s, (%s))" (deh_show_inductive ind) (deh_show_universe_instance ui)
+  | Construct ((ind, j), ui) -> Printf.sprintf "CO((%s, %d), (%s))" (deh_show_inductive ind) j (deh_show_universe_instance ui)
+  | Case (ci, c1, c2, cs) -> Printf.sprintf "CS(%s, %s, %s, %s)" (deh_show_case_info ci) (deh_show_constr c1) (deh_show_constr c2) (deh_show_arr deh_show_constr ", " cs)
+  | Fix ((iarr, i), pc) -> Printf.sprintf "F((%s, %d), %s)" (deh_show_int_arr iarr) i (deh_show_prec_declaration pc)
+  | CoFix (i, pc) -> Printf.sprintf "CF(%d, %s)" i (deh_show_prec_declaration pc)
+  | Proj (proj, c) -> Printf.sprintf "PJ(%s, %s)" (Names.Projection.to_string proj) (deh_show_constr c)
+and deh_show_cast_kind ck =
+  match ck with
+  | VMcast -> "V"
+  | NATIVEcast -> "N"
+  | DEFAULTcast -> "D"
+  | REVERTcast -> "R"
+and deh_show_universe_instance ui =
+  deh_show_arr Univ.Level.to_string ", " (Univ.Instance.to_array ui)
+and deh_show_prec_declaration (names, types, constrs) =
+  let names' = deh_show_arr deh_show_name ", " names in
+  let types' = deh_show_arr deh_show_constr ", " types in
+  let constrs' = deh_show_arr deh_show_constr ", " constrs in
+  Printf.sprintf "((%s), (%s), (%s))" names' types' constrs'
+and deh_show_inductive (mutind, i) =
+  Printf.sprintf "(%s, %d)" (Names.MutInd.to_string mutind) i
+and deh_show_int_arr iarr =
+  deh_show_arr string_of_int ", " iarr
+and deh_show_case_info ci =
+  Printf.sprintf "(%s, %d, %s, %s)" (deh_show_inductive ci.ci_ind) (ci.ci_npar) (deh_show_int_arr ci.ci_cstr_ndecls) (deh_show_int_arr ci.ci_cstr_nargs)
 *)
