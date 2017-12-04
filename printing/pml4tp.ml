@@ -5,7 +5,6 @@ open Printer
 
 
 (* Kludge counters *)
-
 let deh_counter = ref 0
 let deh_counter2 = ref 0
 let deh_counter3 = ref 0
@@ -115,11 +114,11 @@ let rec share_constr c =
   | Const (const, ui) -> 
       add_constrM idx (Printf.sprintf "C %s [%s]" (Names.Constant.to_string const) (share_universe_instance ui))
   | Ind (ind, ui) ->
-      let (s, i) = share_inductive ind in
-      add_constrM idx (Printf.sprintf "I %s %d [%s]" s i (share_universe_instance ui))
-  | Construct ((ind, j), ui) ->
-      let (s, i) = share_inductive ind in
-      add_constrM idx (Printf.sprintf "CO %s %d %d [%s]" s i j (share_universe_instance ui))
+      let (mutind, pos) = share_inductive ind in
+      add_constrM idx (Printf.sprintf "I %s %d [%s]" mutind pos (share_universe_instance ui))
+  | Construct ((ind, conid), ui) ->
+      let (mutind, pos) = share_inductive ind in
+      add_constrM idx (Printf.sprintf "CO %s %d %d [%s]" mutind pos conid (share_universe_instance ui))
   | Case (ci, c1, c2, cs) ->
       let idx1 = share_constr c1 in
       let idx2 = share_constr c2 in
@@ -144,8 +143,8 @@ and share_cast_kind ck =
   | REVERTcast -> "R"
 and share_universe_instance ui =
   deh_show_arr Univ.Level.to_string " " (Univ.Instance.to_array ui)
-and share_inductive (mutind, i) =
-  (Names.MutInd.to_string mutind, i)
+and share_inductive (mutind, pos) =
+  (Names.MutInd.to_string mutind, pos)
 and share_prec_declaration (names, types, constrs) =
   let names' = deh_show_arr deh_show_name " " names in
   let types' = share_constrs types in
@@ -154,8 +153,8 @@ and share_prec_declaration (names, types, constrs) =
 and share_int_arr iarr =
   deh_show_arr string_of_int " " iarr
 and share_case_info ci =
-  let (mutind, i) = share_inductive ci.ci_ind in
-  Printf.sprintf "%s %d %d %s %s" mutind i (ci.ci_npar) (share_int_arr ci.ci_cstr_ndecls) (share_int_arr ci.ci_cstr_nargs)
+  let (mutind, pos) = share_inductive ci.ci_ind in
+  Printf.sprintf "%s %d %d [%s] [%s]" mutind pos (ci.ci_npar) (share_int_arr ci.ci_cstr_ndecls) (share_int_arr ci.ci_cstr_nargs)
 
 
 (* Showing type and expression contexts *)

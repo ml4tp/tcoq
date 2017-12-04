@@ -146,6 +146,7 @@ let f_avoid_ids : Id.t list TacStore.field = TacStore.field ()
 (* ids inherited from the call context (needed to get fresh ids) *)
 let f_debug : debug_info TacStore.field = TacStore.field ()
 let f_trace : ltac_trace TacStore.field = TacStore.field ()
+let f_ml4tp : string TacStore.field = TacStore.field ()
 
 (* Signature for interpretation: val_interp and interpretation functions *)
 type interp_sign = Geninterp.interp_sign = {
@@ -230,6 +231,102 @@ let curr_debug ist = match TacStore.get ist.extra f_debug with
 | None -> DebugOff
 | Some level -> level
 
+
+(* ************************************************************************** *)
+(* ML4TP tactic state printing functions *)
+
+let _ML4TP_AF = "af"
+let _ML4TP_BF = "bf"
+let _ML4TP_DEAD = "dead"
+
+let ml4tp_show_ltac_call_kind lck =
+  match lck with
+  | LtacMLCall _ -> "ML"
+  | LtacNotationCall _ -> "Not"
+  | LtacNameCall _ -> "Name"
+  | LtacAtomCall _ -> "Atom"
+  | LtacVarCall _ -> "Var"
+  | LtacConstrInterp _ -> "Constr"
+
+let ml4tp_print_tactic mode (call : Loc.t * ltac_call_kind) extra uid =
+  match snd call with
+  | LtacVarCall _ -> Proofview.tclUNIT ()
+  | LtacConstrInterp _ -> Proofview.tclUNIT ()
+  | _ ->
+    let name = Profile_ltac.string_of_call (snd call) in
+    let loc = fst call in
+    let sloc = Printf.sprintf "(%s,%d,%d)" (loc.Loc.fname) (loc.Loc.bp) (loc.Loc.ep) in
+    let lck = ml4tp_show_ltac_call_kind (snd call) in
+    Proofview.numgoals >>= fun numgoals ->
+    if numgoals == 0 
+    then (
+      print_string (Printf.sprintf "bg(ts) {!} %d {!} %s {!} %s {!} %s {!} %s\n" uid mode name lck sloc);
+      print_string ("ngs=0\n");
+      print_string "en(ts)\n";
+      Proofview.tclUNIT ()
+    )
+    else (
+      Proofview.Goal.enter { enter = begin fun gl ->
+        let env = Proofview.Goal.env gl in
+        (* TODO(deh): uncomment me after testing out control flow *)
+        (*
+        let sigma = project gl in
+        let concl = Tacmach.New.pf_nf_concl gl in
+        let lids = Pml4tp.deh_update_context env sigma in
+        let cid = Pml4tp.share_constr concl in
+        let _ = Pml4tp.deh_add_goal cid env sigma concl in
+        let goal' = Printf.sprintf "%s {!} %d" (Pml4tp.deh_show_ls Names.Id.to_string ", " lids) cid in
+        *)
+        let gid = Evar.repr (Proofview.Goal.goal (Proofview.Goal.assume gl)) in
+        let full_tac =
+          match extra with
+          | None -> ""
+          | Some tac -> Pp.string_of_ppcmds (Pptactic.pr_glob_tactic env tac)
+        in
+        (* NOTE(deh): printing out ASTs for something that looks like the below
+        let goal = pr_context_of env sigma ++ fnl () ++
+                   str "============================" ++ fnl () ++
+                   (pr_goal_concl_style_env env sigma concl)
+        in
+        *)
+          print_string (Printf.sprintf "bg(ts) {!} %d {!} %s {!} %s {!} %s {!} %s\n" uid mode name lck sloc) ;
+          print_string (Printf.sprintf "%d {!} %s {!} %d\n" numgoals full_tac gid);
+          (* TODO(deh): uncomment me after testing out control flow *)
+          (* print_string goal'; *)
+          print_string "\n";
+          print_string "en(ts)\n";
+          Proofview.tclUNIT ()
+      end })
+
+let ml4tp_wrap_tac' tac call call_id =
+  let tac' ev =
+     ml4tp_print_tactic _ML4TP_BF call None call_id <*>
+     let gl = Evar.repr ev in
+     Proofview.tclIFCATCH tac
+       (fun () -> ml4tp_print_tactic (Printf.sprintf "af(%d)" gl) call None call_id)
+       (fun (e, info) ->
+          ml4tp_print_tactic (Printf.sprintf "dead(%d)" gl) call None call_id <*>
+          Proofview.tclZERO ~info e)
+  in
+    Proofview.Goal.goals >>= fun glms ->
+    Proofview.tclDISPATCHL glms >>= fun gls ->
+    (* (Evd.evar -> 'a -> 'b -> 'b Proof.t) -> 'b -> 'a list -> 'b Proof.t *)
+    Proofview.ml4tp_fold_left2_goal (fun ev _ _ -> tac' ev) () gls <*>
+    Proofview.tclUNIT ()
+
+let ml4tp_wrap_tac tac call =
+  Proofview.tclUNIT (Pml4tp.deh_counter_inc()) >>= fun call_id ->
+  ml4tp_wrap_tac' tac call call_id
+
+let ml4tp_catch_error_tac call_trace tac call =
+  Proofview.tclUNIT (Pml4tp.deh_counter_inc()) >>= fun call_id ->
+  Proofview.tclORELSE
+    (ml4tp_wrap_tac' tac call call_id)
+    (catching_error call_trace (fun (e, info) -> Proofview.tclZERO ~info e))
+
+(* ************************************************************************** *)
+
+
 (** TODO: unify printing of generic Ltac values in case of coercion failure. *)
 
 (* Displays a value *)
@@ -286,75 +383,16 @@ let constr_of_id env id =
 
 (** Generic arguments : table of interpretation functions *)
 
-let deh_show_ltac_call_kind lck =
-  match lck with
-  | LtacMLCall _ -> "ML"
-  | LtacNotationCall _ -> "Not"
-  | LtacNameCall _ -> "Name"
-  | LtacAtomCall _ -> "Atom"
-  | LtacVarCall _ -> "Var"
-  | LtacConstrInterp _ -> "Constr"
-
-let deh_print_tactic mode (call : Loc.t * ltac_call_kind) extra uid =
-  match snd call with
-  | LtacVarCall _ -> Proofview.tclUNIT ()
-  | LtacConstrInterp _ -> Proofview.tclUNIT ()
-  | _ ->
-    let name = Profile_ltac.string_of_call (snd call) in
-    let loc = fst call in
-    let sloc = Printf.sprintf "(%s,%d,%d)" (loc.Loc.fname) (loc.Loc.bp) (loc.Loc.ep) in
-    let lck = deh_show_ltac_call_kind (snd call) in
-    Proofview.numgoals >>= fun numgoals ->
-    if numgoals == 0 
-    then (
-      print_string (Printf.sprintf "bg(ts) {!} %d {!} %s {!} %s {!} %s {!} %s\n" uid mode name lck sloc);
-      print_string ("ngs=0\n");
-      print_string "en(ts)\n";
-      Proofview.tclUNIT ()
-    )
-    else (
-      Proofview.Goal.enter { enter = begin fun gl ->
-        let env = Proofview.Goal.env gl in
-        let sigma = project gl in
-        let concl = Tacmach.New.pf_nf_concl gl in
-        let gid = Evar.repr (Proofview.Goal.goal (Proofview.Goal.assume gl)) in
-        let full_tac =
-          match extra with
-          | None -> ""
-          | Some tac -> Pp.string_of_ppcmds (Pptactic.pr_glob_tactic env tac)
-        in
-        (*
-        let goal = pr_context_of env sigma ++ fnl () ++
-                   str "============================" ++ fnl () ++
-                   (pr_goal_concl_style_env env sigma concl)
-        in
-        *)
-        let lids = Pml4tp.deh_update_context env sigma in
-        let cid = Pml4tp.share_constr concl in
-        let _ = Pml4tp.deh_add_goal cid env sigma concl in
-        let goal' = Printf.sprintf "%s {!} %d" (Pml4tp.deh_show_ls Names.Id.to_string ", " lids) cid
-        in
-          print_string (Printf.sprintf "bg(ts) {!} %d {!} %s {!} %s {!} %s {!} %s\n" uid mode name lck sloc) ;
-          print_string (Printf.sprintf "%d {!} %s {!} %d\n" numgoals full_tac gid);
-          (* print_string (Pp.string_of_ppcmds (v 0 goal)); *)
-          (* print_string "\n"; *)
-          (* print_string "{!}\n"; *)
-          print_string goal'; 
-          print_string "\n";
-          print_string "en(ts)\n";
-          Proofview.tclUNIT ()
-      end })
-
 (* Some of the code further down depends on the fact that push_trace does not modify sigma (the evar map) *)
-let push_trace call ist extra uid = match TacStore.get ist.extra f_trace with
+let push_trace call ist extra = match TacStore.get ist.extra f_trace with
 | None -> 
-    deh_print_tactic "bf" call extra uid >>= fun () ->
-    Proofview.tclUNIT (0, [call])
+    (* ml4tp_print_tactic _ML4TP_BF call extra uid >>= fun () -> *)
+    Proofview.tclUNIT [call]
 | Some trace ->
-    deh_print_tactic "bf" call extra uid >>= fun () -> 
-    Proofview.tclUNIT (0, (call :: trace))
+    (* ml4tp_print_tactic _ML4TP_BF call extra uid >>= fun () -> *)
+    Proofview.tclUNIT (call :: trace)
 
-(* Only called from interp_ltac_reference *)
+(* NOTE(deh): Only called from interp_ltac_reference *)
 let propagate_trace ist loc id v =
   let v = Value.normalize v in
   if has_type v (topwit wit_tacvalue) then
@@ -362,9 +400,9 @@ let propagate_trace ist loc id v =
     match tacv with
     | VFun (appl,_,lfun,it,b) ->
         let t = if List.is_empty it then b else TacFun (it,b) in
-        push_trace(loc,LtacVarCall (id,t)) ist None (-1) >>= fun (uid', trace) ->
+        push_trace(loc,LtacVarCall (id,t)) ist None >>= fun trace ->
         let ans = VFun (appl,trace,lfun,it,b) in
-        deh_print_tactic "af" (loc, LtacVarCall (id, t)) None (-1) >>= fun () ->
+        (* ml4tp_print_tactic _ML4TP_AF (loc, LtacVarCall (id, t)) None (-1) >>= fun () -> *)
         Proofview.tclUNIT (of_tacvalue ans)
     | _ ->  Proofview.tclUNIT v
   else Proofview.tclUNIT v
@@ -700,7 +738,7 @@ let interp_gen kind ist allow_patvar flags env sigma (c,ce) =
       not modify sigma. *)
   let (_, dummy_proofview) = Proofview.init sigma [] in
   let call = (loc_of_glob_constr c,LtacConstrInterp (c,vars)) in
-  let ((_, trace),_,_,_) = Proofview.apply env (push_trace (loc_of_glob_constr c,LtacConstrInterp (c,vars)) ist None (-1)) dummy_proofview in
+  let (trace,_,_,_) = Proofview.apply env (push_trace (loc_of_glob_constr c,LtacConstrInterp (c,vars)) ist None) dummy_proofview in
   let (evd,c) =
     catch_error trace (understand_ltac flags env sigma vars kind) c
   in
@@ -710,12 +748,12 @@ let interp_gen kind ist allow_patvar flags env sigma (c,ce) =
   (*
   let computation = 
     Proofview.tclLIFT (db_constr (curr_debug ist) env c) >>= fun () ->
-    deh_print_tactic call >>= fun () ->
+    ml4tp_print_tactic call >>= fun () ->
     Proofview.tclUNIT ()
   in
   *)
   Proofview.NonLogical.run (db_constr (curr_debug ist) env c);
-  let _ = Proofview.apply env (deh_print_tactic "af" call None (-1)) dummy_proofview in
+  let _ = Proofview.apply env (ml4tp_print_tactic _ML4TP_AF call None (-1)) dummy_proofview in
   (evd,c)
 
 let constr_flags = {
@@ -1229,7 +1267,7 @@ let warn_deprecated_info =
             strbrk "Some specific verbose tactics may also exist, such as info_eauto.")
 
 (* Interprets an l-tac expression into a value *)
-let rec val_interp ist ?(appl=UnnamedAppl) (tac:glob_tactic_expr) kludge : Val.t Ftactic.t =
+let rec val_interp ist ?(appl=UnnamedAppl) (tac:glob_tactic_expr) : Val.t Ftactic.t =
   (* The name [appl] of applied top-level Ltac names is ignored in
      [value_interp]. It is installed in the second step by a call to
      [name_vfun], because it gives more opportunities to detect a
@@ -1246,14 +1284,7 @@ let rec val_interp ist ?(appl=UnnamedAppl) (tac:glob_tactic_expr) kludge : Val.t
   | TacArg (loc,a) -> interp_tacarg ist a
   | t ->
     (** Delayed evaluation *)
-    (* Ftactic.return (of_tacvalue (VFun (UnnamedAppl,extract_trace ist, ist.lfun, [], t))) *)
-    match kludge with
-    | Some name ->
-        (* let mltac_name = { mltac_plugin="DEH_KLUDGE"; mltac_tactic=name } in 
-        let mltac_entry = { mltac_name=mltac_name; mltac_index=(-42) } in *)
-        let foo = [ Some (id_of_string "DEH_KLUDGE"); Some (id_of_string name) ] in 
-        Ftactic.return (of_tacvalue (VFun (UnnamedAppl,extract_trace ist, ist.lfun, foo, t)))
-    | None -> Ftactic.return (of_tacvalue (VFun (UnnamedAppl,extract_trace ist, ist.lfun, [], t)))
+    Ftactic.return (of_tacvalue (VFun (UnnamedAppl,extract_trace ist, ist.lfun, [], t)))
   in
   let open Ftactic in
   Control.check_for_interrupt ();
@@ -1271,18 +1302,9 @@ and eval_tactic ist tac : unit Proofview.tactic =
   match tac with
   | TacAtom (loc,t) ->
       let call = LtacAtomCall t in
-      let uid = Pml4tp.deh_counter_inc() in
-      push_trace(loc,call) ist (Some (TacAtom (loc, t))) uid >>= fun (uid', trace) ->
-      (*
+      push_trace(loc,call) ist (Some (TacAtom (loc, t))) >>= fun trace ->
       Profile_ltac.do_profile "eval_tactic:2" trace
-        (catch_error_tac trace (interp_atomic ist t)) >>= fun () ->
-      deh_print_tactic "af" (loc, call) None
-      *)
-      Proofview.tclIFCATCH 
-        (Profile_ltac.do_profile "eval_tactic:2" trace
-         (catch_error_tac trace (interp_atomic ist t)))
-        (fun () -> deh_print_tactic "af" (loc, call) None uid)
-        (fun (e, info) -> deh_print_tactic "dead" (loc, call) None uid <*> Proofview.tclZERO ~info e)  
+         (ml4tp_catch_error_tac trace (interp_atomic ist t) (loc, call))
   | TacFun _ | TacLetIn _ -> assert false
   | TacMatchGoal _ | TacMatch _ -> assert false
   | TacId [] -> Proofview.tclLIFT (db_breakpoint (curr_debug ist) [])
@@ -1335,27 +1357,15 @@ and eval_tactic ist tac : unit Proofview.tactic =
       let loc = Loc.ghost in 
       let foo = Names.KerName.make2 Names.ModPath.initial (Names.mk_label "TacDo") in
       let call = (loc, LtacNotationCall foo) in
-      deh_print_tactic "bf" call None uid >>= fun () ->
+      ml4tp_print_tactic _ML4TP_BF call None uid >>= fun () ->
       Proofview.tclIFCATCH
         (Tacticals.New.tclDO (interp_int_or_var ist n) (interp_tactic ist tac))
-        (fun () -> deh_print_tactic "af" call None uid)
-        (fun (e, info) -> deh_print_tactic "dead" call None uid <*> Proofview.tclZERO ~info e)  
+        (fun () -> ml4tp_print_tactic _ML4TP_AF call None uid)
+        (fun (e, info) -> ml4tp_print_tactic _ML4TP_DEAD call None uid <*> Proofview.tclZERO ~info e)  
       *)
   | TacTimeout (n,tac) -> Tacticals.New.tclTIMEOUT (interp_int_or_var ist n) (interp_tactic ist tac)
   | TacTime (s,tac) -> Tacticals.New.tclTIME s (interp_tactic ist tac)
-  | TacTry tac ->
-      Tacticals.New.tclTRY (interp_tactic ist tac)
-      (*
-      let uid = deh_counter_inc() in
-      let loc = Loc.ghost in 
-      let foo = Names.KerName.make2 Names.ModPath.initial (Names.mk_label "TacTry") in
-      let call = (loc, LtacNotationCall foo) in
-      deh_print_tactic "bf" call None uid >>= fun () ->
-      Proofview.tclIFCATCH
-        (Tacticals.New.tclTRY (interp_tactic ist tac))
-        (fun () -> deh_print_tactic "af" call None uid)
-        (fun (e, info) -> deh_print_tactic "dead" call None uid <*> Proofview.tclZERO ~info e)  
-      *)
+  | TacTry tac -> Tacticals.New.tclTRY (interp_tactic ist tac)
   | TacRepeat tac -> Tacticals.New.tclREPEAT (interp_tactic ist tac)
   | TacOr (tac1,tac2) ->
       Tacticals.New.tclOR (interp_tactic ist tac1) (interp_tactic ist tac2)
@@ -1383,18 +1393,17 @@ and eval_tactic ist tac : unit Proofview.tactic =
       let (ids, body) = Tacenv.interp_alias s in
       let (>>=) = Ftactic.bind in
       let interp_vars = Ftactic.List.map (fun v -> interp_tacarg ist v) l in
-      let uid = Pml4tp.deh_counter_inc() in
+      (* let uid = Pml4tp.deh_counter_inc() in *)
       let tac l' =
         let addvar x v accu = Id.Map.add x v accu in
         let lfun = List.fold_right2 addvar ids l' ist.lfun in
-        Ftactic.lift (push_trace (loc,LtacNotationCall s) ist (Some (TacAlias (loc,s,l))) uid) >>= fun (uid', trace) ->
+        Ftactic.lift (push_trace (loc,LtacNotationCall s) ist (Some (TacAlias (loc,s,l)))) >>= fun trace ->
         let ist = {
           lfun = lfun;
           extra = TacStore.set ist.extra f_trace trace; } in
-        val_interp ist body None >>= fun v ->
+        val_interp ist body >>= fun v ->
         Ftactic.lift (tactic_of_value ist v) >>= fun () ->
-        Ftactic.lift (Proofview.tclUNIT uid')
-        (* Ftactic.lift (Proofview.tclUNIT ()) *)
+        Ftactic.lift (Proofview.tclUNIT ())
       in
       let tac =
         Ftactic.with_env interp_vars >>= (fun (env, lr) ->
@@ -1411,40 +1420,33 @@ and eval_tactic ist tac : unit Proofview.tactic =
         else Tacticals.New.tclZEROMSG (str "Arguments length mismatch: \
           expected " ++ int len1 ++ str ", found " ++ int len2)
       in
-      let open Proofview.Notations in
       let call = (loc, LtacNotationCall s) in
+      let open Proofview.Notations in
+      ml4tp_wrap_tac (Ftactic.run tac (fun () -> Proofview.tclUNIT ())) call
       (*
       Proofview.tclIFCATCH
-        (Ftactic.run tac (fun uid' -> deh_print_tactic "af" call None uid))
-        (fun () -> Proofview.tclUNIT ())
-        (fun (e, info) -> deh_print_tactic "dead" call None uid (-43) <*> Proofview.tclZERO ~info e)
+        (ml4tp_print_tactic _ML4TP_BF call None uid <*> Ftactic.run tac (fun _ -> Proofview.tclUNIT ()))
+        (fun uid2 -> ml4tp_print_tactic _ML4TP_AF call None uid)
+        (fun (e, info) -> ml4tp_print_tactic _ML4TP_DEAD call None uid <*> Proofview.tclZERO ~info e)
       *)
-      Proofview.tclIFCATCH
-        (Ftactic.run tac (fun _ -> Proofview.tclUNIT ()))
-        (fun uid2 -> deh_print_tactic "af" call None uid)
-        (fun (e, info) -> deh_print_tactic "dead" call None uid <*> Proofview.tclZERO ~info e)
   | TacML (loc,opn,l) ->
       let call = (loc,LtacMLCall tac) in
-      let uid = Pml4tp.deh_counter_inc() in
-      push_trace call ist (Some (TacML (loc,opn,l))) uid >>= fun (uid', trace) ->
+      push_trace call ist (Some (TacML (loc,opn,l))) >>= fun trace ->
       let ist = { ist with extra = TacStore.set ist.extra f_trace trace; } in
       let tac = Tacenv.interp_ml_tactic opn in
       let args = Ftactic.List.map_right (fun a -> interp_tacarg ist a) l in
       let tac args =
         let name () = Pptactic.pr_extend (fun v -> print_top_val () v) 0 opn args in
-        Proofview.Trace.name_tactic name (catch_error_tac trace (tac args ist))
+        Proofview.Trace.name_tactic name (ml4tp_catch_error_tac trace (tac args ist) call)
       in
-      Proofview.tclIFCATCH 
-        (Ftactic.run args tac)
-        (fun () -> deh_print_tactic "af" call None uid)
-        (fun (e, info) -> deh_print_tactic "dead" call None uid <*> Proofview.tclZERO ~info e)
+      Ftactic.run args tac
 
 and force_vrec ist v : Val.t Ftactic.t =
   let v = Value.normalize v in
   if has_type v (topwit wit_tacvalue) then
     let v = to_tacvalue v in
     match v with
-    | VRec (lfun,body) -> val_interp {ist with lfun = !lfun} body None
+    | VRec (lfun,body) -> val_interp {ist with lfun = !lfun} body
     | v -> Ftactic.return (of_tacvalue v)
   else Ftactic.return v
 
@@ -1465,42 +1467,37 @@ and interp_ltac_reference uid loc' mustbetac ist r : Val.t Ftactic.t =
       let loc_info = ((if Loc.is_ghost loc' then loc else loc'),LtacNameCall r) in
       let extra = TacStore.set ist.extra f_avoid_ids ids in
       let open Ftactic in
-      Ftactic.lift (push_trace loc_info ist None uid) >>= fun (uid', trace) ->
+      Ftactic.lift (push_trace loc_info ist None) >>= fun trace ->
       let extra = TacStore.set extra f_trace trace in
+      (* let extra = TacStore.set extra f_ml4tp "HELLO" in *)
       let ist = { lfun = Id.Map.empty; extra = extra; } in
       let appl = GlbAppl[r,[]] in
-      let kludge = Some (Profile_ltac.string_of_call (LtacNameCall r)) in
-      val_interp ~appl ist (Tacenv.interp_ltac r) kludge >>= fun result ->
-      (* deh_print_tactic "af" loc_info None uid >>= fun () -> *)
+      Ftactic.lift (ml4tp_print_tactic _ML4TP_BF loc_info None uid) <*>
+      val_interp ~appl ist (Tacenv.interp_ltac r) >>= fun result ->
       Ftactic.return result
 
-and deh_end_tacarg2 loc r uid v =
+and ml4tp_end_tacarg loc r uid v =
   match r with
   | ArgVar _ -> Proofview.tclUNIT v
   | ArgArg (loc', r) ->
       let call = ((if Loc.is_ghost loc' then dloc else loc'),LtacNameCall r) in
-      deh_print_tactic "af" call None uid <*>
+      ml4tp_print_tactic _ML4TP_AF call None uid <*>
       Proofview.tclUNIT v
 
 and interp_tacarg ist arg : Val.t Ftactic.t =
-  (* print_string ("deh(ltac/tacinterp.ml@interp_tacarg: " ^ (deh_show_gen_tactic_arg deh_show_r_dispatch arg) ^ ")\n"); *)
   match arg with
   | TacGeneric arg -> interp_genarg ist arg
   | Reference r -> (* interp_ltac_reference dloc false ist r *)
       let uid = Pml4tp.deh_counter_inc() in
       Proofview.tclIFCATCH 
             (interp_ltac_reference uid dloc false ist r)
-            (fun v -> deh_end_tacarg2 dloc r uid v)
+            (fun v -> ml4tp_end_tacarg dloc r uid v)
             (fun (e, info) -> 
                match r with
                | ArgVar _ -> Proofview.tclZERO ~info e
                | ArgArg (loc', r) ->
-                  deh_print_tactic "dead" (dloc, LtacNameCall r) None uid <*>
-                  Proofview.tclZERO ~info e) 
-      (*
-      interp_ltac_reference dloc false ist r >>= fun (uid, v) ->
-      deh_end_tacarg dloc r uid v     
-      *)       
+                  ml4tp_print_tactic _ML4TP_DEAD (dloc, LtacNameCall r) None uid <*>
+                  Proofview.tclZERO ~info e)      
   | ConstrMayEval c ->
       Ftactic.s_enter { s_enter = begin fun gl ->
         let sigma = project gl in
@@ -1512,18 +1509,13 @@ and interp_tacarg ist arg : Val.t Ftactic.t =
       let uid = Pml4tp.deh_counter_inc() in
       Proofview.tclIFCATCH 
             (interp_ltac_reference uid loc true ist r)
-            (fun v -> deh_end_tacarg2 dloc r uid v)
+            (fun v -> ml4tp_end_tacarg dloc r uid v)
             (fun (e, info) -> 
                match r with
                | ArgVar _ -> Proofview.tclZERO ~info e
                | ArgArg (loc', r) ->
-                  deh_print_tactic "dead" (dloc, LtacNameCall r) None uid <*>
-                  Proofview.tclZERO ~info e) 
-      (*
-      let (>>=) = Ftactic.bind in
-      interp_ltac_reference uid loc true ist r >>= fun v ->
-      deh_end_tacarg loc r uid v
-      *)
+                  ml4tp_print_tactic _ML4TP_DEAD (dloc, LtacNameCall r) None uid <*>
+                  Proofview.tclZERO ~info e)
   | TacCall (loc,f,l) ->
       (*
       let (>>=) = Ftactic.bind in
@@ -1537,17 +1529,13 @@ and interp_tacarg ist arg : Val.t Ftactic.t =
       Ftactic.List.map (fun a -> interp_tacarg ist a) l >>= fun largs ->
       Proofview.tclIFCATCH 
             (interp_app loc ist fv largs)
-            (fun v -> deh_end_tacarg2 dloc f uid v)
+            (fun v -> ml4tp_end_tacarg dloc f uid v)
             (fun (e, info) -> 
                match f with
                | ArgVar _ -> Proofview.tclZERO ~info e
                | ArgArg (loc', r) ->
-                  deh_print_tactic "dead" (dloc, LtacNameCall r) None uid <*>
-                  Proofview.tclZERO ~info e) 
-      (*
-      interp_app loc ist fv largs >>= fun v ->
-      deh_end_tacarg loc f uid v
-      *)
+                  ml4tp_print_tactic _ML4TP_DEAD (dloc, LtacNameCall r) None uid <*>
+                  Proofview.tclZERO ~info e)
   | TacFreshId l ->
       Ftactic.enter { enter = begin fun gl ->
         let id = interp_fresh_id ist (pf_env gl) (project gl) l in
@@ -1567,7 +1555,7 @@ and interp_tacarg ist arg : Val.t Ftactic.t =
         Proofview.numgoals >>= fun i ->
         Proofview.tclUNIT (Value.of_int i)
       end
-  | Tacexp t -> val_interp ist t None
+  | Tacexp t -> val_interp ist t
 
 (* Interprets an application node *)
 and interp_app loc ist fv largs : Val.t Ftactic.t =
@@ -1592,7 +1580,7 @@ and interp_app loc ist fv largs : Val.t Ftactic.t =
               let ist = {
                 lfun = newlfun;
                 extra = TacStore.set ist.extra f_trace []; } in
-              catch_error_tac trace (val_interp ist body None) >>= fun v ->
+              catch_error_tac trace (val_interp ist body) >>= fun v ->
               Ftactic.return (name_vfun (push_appl appl largs) v)
             end
 	    begin fun (e, info) ->
@@ -1622,8 +1610,16 @@ and tactic_of_value ist vle =
       let ist = {
         lfun = lfun;
         extra = TacStore.set ist.extra f_trace []; } in
+      (*
+      let deh_kludge_tac tac =
+        match TacStore.get ist.extra f_ml4tp with
+        | Some msg -> Proofview.tclUNIT (print_string msg) <*> tac
+        | None -> Proofview.tclUNIT () <*> tac
+      in
+      *)
       let tac = name_if_glob appl (eval_tactic ist t) in
       Profile_ltac.do_profile "tactic_of_value" trace (catch_error_tac trace tac)
+  (*
   | VFun (appl,trace,lfun,[Some n1; Some n2],t) ->
       if String.equal (Names.string_of_id n1) "DEH_KLUDGE"
       then
@@ -1632,14 +1628,8 @@ and tactic_of_value ist vle =
         extra = TacStore.set ist.extra f_trace []; } in
         let tac = name_if_glob appl (eval_tactic ist t) in
         Profile_ltac.do_profile "tactic_of_value" trace (catch_error_tac trace tac) 
-        (*
-        <*>
-        Proofview.Goal.enter { enter = begin fun gl ->
-          let env = Proofview.Goal.env gl in
-          Proofview.tclUNIT (print_string (Printf.sprintf "AfterHOHOHO(%s, %s)\n" (Names.string_of_id n2) (string_of_ppcmds (Pptactic.pr_glob_tactic env t))))
-        end }
-        *)
       else Tacticals.New.tclZEROMSG (str "A fully applied tactic is expected.")
+  *)
   | (VFun _|VRec _) -> Tacticals.New.tclZEROMSG (str "A fully applied tactic is expected.")
   else if has_type vle (topwit wit_tactic) then
     let tac = out_gen (topwit wit_tactic) vle in
@@ -1657,14 +1647,14 @@ and interp_letrec ist llc u =
   let lfun = List.fold_left fold ist.lfun llc in
   let () = lref := lfun in
   let ist = { ist with lfun } in
-  val_interp ist u None
+  val_interp ist u
 
 (* Interprets the clauses of a LetIn *)
 and interp_letin ist llc u =
   let rec fold lfun = function
   | [] ->
     let ist = { ist with lfun } in
-    val_interp ist u None
+    val_interp ist u
   | ((_, id), body) :: defs ->
     Ftactic.bind (interp_tacarg ist body) (fun v ->
     fold (Id.Map.add id v lfun) defs)
@@ -1679,7 +1669,7 @@ and interp_match_success ist { Tactic_matching.subst ; context ; terms ; lhs } =
   let hyp_subst = Id.Map.map Value.of_constr terms in
   let lfun = extend_values_with_bindings subst (lctxt +++ hyp_subst +++ ist.lfun) in
   let ist = { ist with lfun } in
-  val_interp ist lhs None >>= fun v ->
+  val_interp ist lhs >>= fun v ->
   if has_type v (topwit wit_tacvalue) then match to_tacvalue v with
   | VFun (appl,trace,lfun,[],t) ->
       let ist = {
@@ -1807,7 +1797,7 @@ and interp_genarg_var_list ist x =
 and interp_ltac_constr ist e : constr Ftactic.t =
   let (>>=) = Ftactic.bind in
   begin Proofview.tclORELSE
-      (val_interp ist e None)
+      (val_interp ist e)
       begin function (err, info) -> match err with
         | Not_found ->
             Ftactic.enter { enter = begin fun gl ->
@@ -1844,7 +1834,7 @@ and interp_ltac_constr ist e : constr Ftactic.t =
 
 (* Interprets tactic expressions : returns a "tactic" *)
 and interp_tactic ist tac : unit Proofview.tactic =
-  Ftactic.run (val_interp ist tac None) (fun v -> tactic_of_value ist v)
+  Ftactic.run (val_interp ist tac) (fun v -> tactic_of_value ist v)
 
 (* Provides a "name" for the trace to atomic tactics *)
 and name_atomic ?env tacexpr tac : unit Proofview.tactic =
@@ -1857,7 +1847,6 @@ and name_atomic ?env tacexpr tac : unit Proofview.tactic =
 
 (* Interprets a primitive tactic *)
 and interp_atomic ist tac : unit Proofview.tactic =
-  (* print_string ("deh(ltac/tacinterp.ml@interp_atomic: " ^ deh_show_gen_atomic_tactic_expr tac ^ ")\n"); *)
   match tac with
   (* Basic tactics *)
   | TacIntroPattern (ev,l) ->
@@ -2167,8 +2156,6 @@ let default_ist () =
   { lfun = Id.Map.empty; extra = extra }
 
 let eval_tactic t =
-  (* deh(t: Tacexpr.glob_tactic_expr = Tacexpr.g_dispatch Tacexpr.gen_tactic_expr) *)
-  (* print_string ("deh(ltac/tacinterp.ml@eval_tactic: " ^ deh_show_gen_tactic_expr deh_show_r_dispatch t ^ ")\n"); *)
   Proofview.tclUNIT () >>= fun () -> (* delay for [default_ist] *)
   Proofview.tclLIFT db_initialize <*>
   interp_tactic (default_ist ()) t
@@ -2308,7 +2295,7 @@ let () =
 (***************************************************************************)
 (* Other entry points *)
 
-let val_interp ist tac k = Ftactic.run (val_interp ist tac None) k
+let val_interp ist tac k = Ftactic.run (val_interp ist tac) k
 
 let interp_ltac_constr ist c k = Ftactic.run (interp_ltac_constr ist c) k
 

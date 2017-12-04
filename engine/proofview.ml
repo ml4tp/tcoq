@@ -208,10 +208,6 @@ type +'a tactic = 'a Proof.t
 
 (** Applies a tactic to the current proofview. *)
 let apply env t sp =
-  (* deh(env: Environ.env) *)
-  (* deh(t: 'a tactic = a Proof.t = 'a Logic_monad.Logical(Proofview_monad.P).t) *)
-  (* deh(sp: proofview = Proofview_monad.proofview) *)
-  (* deh(returns: 'a * proofview * (bool*Goal.goal list*Goal.goal list) * Proofview_monad.Info.tree) *)
   let rec deh_print_ls sep print_fn ls =
     match ls with
     | [] -> ()
@@ -514,6 +510,8 @@ let fold_left2_goal i s l =
   Solution.get >>= fun evd ->
   Comb.set CList.(undefined evd (flatten (rev subgoals))) >>
   return r
+
+let ml4tp_fold_left2_goal (i: Evd.evar -> 'a -> 'b -> 'b tactic) (s: 'b) (l: 'a list) : 'b tactic = fold_left2_goal i s l
 
 (** Dispatch tacticals are used to apply a different tactic to each
     goal under focus. They come in two flavours: [tclDISPATCH] takes a
