@@ -2425,46 +2425,6 @@ let snapshot_vio ldir long_f_dot_vo =
 
 let reset_task_queue = Slaves.reset_task_queue
 
-let rec deh_show_vernac_typ_exp vt ve =
-  match vt with
-  | VtStartProof (name, _, names) -> 
-      Pml4tp.deh_counter := 0; 
-      Pml4tp.deh_counter2 := 0; 
-      Pml4tp.deh_counter3 := 0; 
-      Pml4tp.deh_counter4 := 0;
-      Pml4tp.deh_clear_typM ();
-      Pml4tp.deh_clear_constrM ();
-      Pml4tp.deh_clear_shareM ();
-      Pml4tp.deh_clear_goalM ();
-      Pml4tp.deh_clear_lowconstrM ();
-      Printf.sprintf "bg(pf) {!} %s {!} %s\n" name (Pml4tp.deh_show_ls Names.Id.to_string ", " names)
-  | VtSideff _ -> ""
-  | VtQed _ -> 
-      print_string "Typs\n";
-      Pml4tp.deh_print_typM ();
-      print_string "Bods\n";
-      Pml4tp.deh_print_constrM ();
-      print_string "Constrs\n";
-      Pml4tp.deh_print_lowconstrM ();
-      print_string "PrTyps\n";
-      Pml4tp.deh_pr_typM ();
-      print_string "PrBods\n";
-      Pml4tp.deh_pr_constrM ();
-      print_string "PrGls\n";
-      Pml4tp.deh_pr_goalM ();
-      "en(pf)\n"
-  | VtProofStep _ ->
-    begin
-      match ve with
-      | VernacSubproof _ -> "bg(spf)\n"
-      | VernacEndSubproof -> "en(spf)\n"
-      | _ -> "" 
-    end
-  | VtProofMode _ -> ""
-  | VtQuery (_, _) -> ""
-  | VtStm (_, _) -> ""
-  | VtUnknown -> ""
-
 (* Document building *)
 let process_transaction ?(newtip=Stateid.fresh ()) ~tty
   ({ verbose; loc; expr } as x) c =
@@ -2477,8 +2437,7 @@ let process_transaction ?(newtip=Stateid.fresh ()) ~tty
       prerr_endline (fun () ->
         "  classified as: " ^ string_of_vernac_classification c);
       let (vt, vw) = c in
-      (* print_string ("deh(@process_transaction; vernac_type: " ^ deh_show_vernac_type vt ^ "; vernac_expr: " ^ deh_show_vernac_expr expr ^ ")\n"); *)
-      print_string (deh_show_vernac_typ_exp vt expr);
+      Pml4tp.show_vernac_typ_exp vt expr;
       match c with
       (* PG stuff *)    
       | VtStm(VtPG,false), VtNow -> vernac_interp Stateid.dummy x; `Ok

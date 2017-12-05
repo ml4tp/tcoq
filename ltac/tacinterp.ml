@@ -272,10 +272,10 @@ let ml4tp_print_tactic mode (call : Loc.t * ltac_call_kind) extra uid =
         (*
         let sigma = project gl in
         let concl = Tacmach.New.pf_nf_concl gl in
-        let lids = Pml4tp.deh_update_context env sigma in
+        let lids = Pml4tp.update_context env sigma in
         let cid = Pml4tp.share_constr concl in
-        let _ = Pml4tp.deh_add_goal cid env sigma concl in
-        let goal' = Printf.sprintf "%s {!} %d" (Pml4tp.deh_show_ls Names.Id.to_string ", " lids) cid in
+        let _ = Pml4tp.add_goal cid env sigma concl in
+        let tacst = Printf.sprintf "%s {!} %d" (Pml4tp.deh_show_ls Names.Id.to_string ", " lids) cid in
         *)
         let gid = Evar.repr (Proofview.Goal.goal (Proofview.Goal.assume gl)) in
         let full_tac =
@@ -292,7 +292,7 @@ let ml4tp_print_tactic mode (call : Loc.t * ltac_call_kind) extra uid =
           print_string (Printf.sprintf "bg(ts) {!} %d {!} %s {!} %s {!} %s {!} %s\n" uid mode name lck sloc) ;
           print_string (Printf.sprintf "%d {!} %s {!} %d\n" numgoals full_tac gid);
           (* TODO(deh): uncomment me after testing out control flow *)
-          (* print_string goal'; *)
+          (* print_string tacst; *)
           print_string "\n";
           print_string "en(ts)\n";
           Proofview.tclUNIT ()
@@ -315,11 +315,11 @@ let ml4tp_wrap_tac' tac call call_id =
     Proofview.tclUNIT ()
 
 let ml4tp_wrap_tac tac call =
-  Proofview.tclUNIT (Pml4tp.deh_counter_inc()) >>= fun call_id ->
+  Proofview.tclUNIT (Pml4tp.fresh_callid()) >>= fun call_id ->
   ml4tp_wrap_tac' tac call call_id
 
 let ml4tp_catch_error_tac call_trace tac call =
-  Proofview.tclUNIT (Pml4tp.deh_counter_inc()) >>= fun call_id ->
+  Proofview.tclUNIT (Pml4tp.fresh_callid()) >>= fun call_id ->
   Proofview.tclORELSE
     (ml4tp_wrap_tac' tac call call_id)
     (catching_error call_trace (fun (e, info) -> Proofview.tclZERO ~info e))
@@ -1353,7 +1353,7 @@ and eval_tactic ist tac : unit Proofview.tactic =
   | TacDo (n,tac) -> 
       Tacticals.New.tclDO (interp_int_or_var ist n) (interp_tactic ist tac)
       (*
-      let uid = deh_counter_inc() in
+      let uid = Pml4tp.fresh_callid() in
       let loc = Loc.ghost in 
       let foo = Names.KerName.make2 Names.ModPath.initial (Names.mk_label "TacDo") in
       let call = (loc, LtacNotationCall foo) in
@@ -1393,7 +1393,7 @@ and eval_tactic ist tac : unit Proofview.tactic =
       let (ids, body) = Tacenv.interp_alias s in
       let (>>=) = Ftactic.bind in
       let interp_vars = Ftactic.List.map (fun v -> interp_tacarg ist v) l in
-      (* let uid = Pml4tp.deh_counter_inc() in *)
+      (* let uid = Pml4tp.fresh_callid() in *)
       let tac l' =
         let addvar x v accu = Id.Map.add x v accu in
         let lfun = List.fold_right2 addvar ids l' ist.lfun in
@@ -1488,7 +1488,7 @@ and interp_tacarg ist arg : Val.t Ftactic.t =
   match arg with
   | TacGeneric arg -> interp_genarg ist arg
   | Reference r -> (* interp_ltac_reference dloc false ist r *)
-      let uid = Pml4tp.deh_counter_inc() in
+      let uid = Pml4tp.fresh_callid() in
       Proofview.tclIFCATCH 
             (interp_ltac_reference uid dloc false ist r)
             (fun v -> ml4tp_end_tacarg dloc r uid v)
@@ -1506,7 +1506,7 @@ and interp_tacarg ist arg : Val.t Ftactic.t =
         Sigma.Unsafe.of_pair (Ftactic.return (Value.of_constr c_interp), sigma)
       end }
   | TacCall (loc,r,[]) -> (* interp_ltac_reference loc true ist r *)
-      let uid = Pml4tp.deh_counter_inc() in
+      let uid = Pml4tp.fresh_callid() in
       Proofview.tclIFCATCH 
             (interp_ltac_reference uid loc true ist r)
             (fun v -> ml4tp_end_tacarg dloc r uid v)
@@ -1523,7 +1523,7 @@ and interp_tacarg ist arg : Val.t Ftactic.t =
       Ftactic.List.map (fun a -> interp_tacarg ist a) l >>= fun largs ->
       interp_app loc ist fv largs
       *)
-      let uid = Pml4tp.deh_counter_inc() in
+      let uid = Pml4tp.fresh_callid() in
       let (>>=) = Ftactic.bind in
       interp_ltac_reference uid loc true ist f >>= fun fv ->
       Ftactic.List.map (fun a -> interp_tacarg ist a) l >>= fun largs ->
