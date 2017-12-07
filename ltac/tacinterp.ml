@@ -269,14 +269,14 @@ let ml4tp_print_tactic mode (call : Loc.t * ltac_call_kind) extra uid =
       Proofview.Goal.enter { enter = begin fun gl ->
         let env = Proofview.Goal.env gl in
         (* TODO(deh): uncomment me after testing out control flow *)
-        (*
+     
         let sigma = project gl in
         let concl = Tacmach.New.pf_nf_concl gl in
         let lids = Pml4tp.update_context env sigma in
         let cid = Pml4tp.share_constr concl in
         let _ = Pml4tp.add_goal cid env sigma concl in
-        let tacst = Printf.sprintf "%s {!} %d" (Pml4tp.deh_show_ls Names.Id.to_string ", " lids) cid in
-        *)
+        let tacst = Printf.sprintf "%s {!} %d" (Pml4tp.show_ls Names.Id.to_string ", " lids) cid in
+        
         let gid = Evar.repr (Proofview.Goal.goal (Proofview.Goal.assume gl)) in
         let full_tac =
           match extra with
@@ -292,7 +292,7 @@ let ml4tp_print_tactic mode (call : Loc.t * ltac_call_kind) extra uid =
           print_string (Printf.sprintf "bg(ts) {!} %d {!} %s {!} %s {!} %s {!} %s\n" uid mode name lck sloc) ;
           print_string (Printf.sprintf "%d {!} %s {!} %d\n" numgoals full_tac gid);
           (* TODO(deh): uncomment me after testing out control flow *)
-          (* print_string tacst; *)
+          print_string tacst;
           print_string "\n";
           print_string "en(ts)\n";
           Proofview.tclUNIT ()
@@ -303,9 +303,9 @@ let ml4tp_wrap_tac' tac call call_id =
      ml4tp_print_tactic _ML4TP_BF call None call_id <*>
      let gl = Evar.repr ev in
      Proofview.tclIFCATCH tac
-       (fun () -> ml4tp_print_tactic (Printf.sprintf "af(%d)" gl) call None call_id)
+       (fun () -> ml4tp_print_tactic (Printf.sprintf "af %d" gl) call None call_id)
        (fun (e, info) ->
-          ml4tp_print_tactic (Printf.sprintf "dead(%d)" gl) call None call_id <*>
+          ml4tp_print_tactic (Printf.sprintf "dead %d" gl) call None call_id <*>
           Proofview.tclZERO ~info e)
   in
     Proofview.Goal.goals >>= fun glms ->

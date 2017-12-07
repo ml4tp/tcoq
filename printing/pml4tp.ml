@@ -200,6 +200,31 @@ and share_case_info ci =
 (* --------------------------------------- *)
 (* Tactic state sharing *)
 
+(* Shadowed identifiers in the tactic state *)
+let tacst_ctx_shadowM = ref Names.Id.Map.empty
+let clear_tacst_ctx_shadowM () = tacst_ctx_shadowM := Names.Id.Map.empty
+
+
+(* Contexts in the tactic state *)
+let tacst_ctxM = ref Names.Id.Map.empty
+let clear_tacst_ctxM () = tacst_ctxM := Names.Id.Map.empty
+let dump_shared_tacst_ctx_typM () =
+  Names.Id.Map.iter (fun k (ty, _, _) -> print_string (Printf.sprintf "%s: %d\n" (Names.Id.to_string k) (share_constr ty))) !tacst_ctxM
+let dump_pretty_tacst_ctx_typM () =
+  Names.Id.Map.iter (fun k (_, pp_ty, _) -> print_string (Printf.sprintf "%s: %s\n" (Names.Id.to_string k) pp_ty)) !tacst_ctxM
+let dump_shared_tacst_ctx_bodyM () =
+  Names.Id.Map.iter (fun k (_, _, body) ->
+    match body with
+    | None -> ()
+    | Some (body, _) -> print_string (Printf.sprintf "%s: %d\n" (Names.Id.to_string k) (share_constr body))) !tacst_ctxM
+let dump_pretty_tacst_ctx_bodyM () =
+  Names.Id.Map.iter (fun k (_, _, body) -> 
+    match body with
+    | None -> ()
+    | Some (_, pp_body) -> print_string (Printf.sprintf "%s: %s\n" (Names.Id.to_string k) pp_body)) !tacst_ctxM
+
+
+(*
 (* Types in the tactic state *)
 let tacst_ctx_typM = ref Names.Id.Map.empty
 let clear_tacst_ctx_typM () = tacst_ctx_typM := Names.Id.Map.empty
@@ -216,7 +241,7 @@ let dump_shared_tacst_ctx_bodyM () =
   Names.Id.Map.iter (fun k (v, _) -> print_string (Printf.sprintf "%s: %d\n" (Names.Id.to_string k) (share_constr v))) !tacst_ctx_bodyM
 let dump_pretty_tacst_ctx_bodyM () =
   Names.Id.Map.iter (fun k (_, str) -> print_string (Printf.sprintf "%s: %s\n" (Names.Id.to_string k) str)) !tacst_ctx_bodyM
-
+*)
 
 (* Goals in the tactic state *)
 let tacst_goalM = ref IntMap.empty
@@ -231,13 +256,80 @@ let dump_pretty_tacst_goalM () =
 (* --------------------------------------- *)
 (* Update context mappings in a tactic-state *)
 
+let gs_ctxid = GenSym.init ()
+let fresh_ctxid () = GenSym.fresh gs_ctxid
+
+(*
 let add_body c id =
   match c with
   | None -> ()
   | Some c -> tacst_ctx_bodyM := Names.Id.Map.add id c !tacst_ctx_bodyM
+*)
 
-let add_typ typ id =
-  tacst_ctx_typM := Names.Id.Map.add id typ !tacst_ctx_typM
+(* Note(deh): 
+ * Take care of shadowing when the same local identifier (in a different proof branch)
+ * have different types.
+ * 
+ * tacst_ctx_idM: id -> [id]       (map identifiers to list of shadowed identifiers)
+ * tacst_ctxM: id -> (typ, body)   (map identifier to type and/or body)
+ *)
+
+(* Take care of shadowing list *)
+let add_ctx_id id id' =
+  if Names.Id.Map.mem id !tacst_ctx_shadowM
+  then (let ids = Names.Id.Map.find id !tacst_ctx_shadowM in
+        tacst_ctx_shadowM := Names.Id.Map.add id (id' :: ids) !tacst_ctx_shadowM)
+  else tacst_ctx_shadowM := Names.Id.Map.add id [id'] !tacst_ctx_shadowM
+
+(* Get the list of shadowed variables *)
+let find_ctx_id_shadowing id =
+  if Names.Id.Map.mem id !tacst_ctx_shadowM
+  then id :: Names.Id.Map.find id !tacst_ctx_shadowM
+  else [id]
+
+let add_ctx (typ, pr_typ, body) id =
+  if Names.Id.Map.mem id !tacst_ctxM
+  then
+    let ids = find_ctx_id_shadowing id in
+    let f id =
+      match (Names.Id.Map.find id !tacst_ctxM, body) with
+      | ((typ', _, Some (body', _)), Some (body, _)) ->
+          Term.eq_constr typ typ' && Term.eq_constr body body'
+      | ((typ', _, None), None) -> Term.eq_constr typ typ'
+      | _ -> false
+    in
+    match List.find_opt f ids with
+    | None ->
+        let ctxid = fresh_ctxid() in
+        let id' = Names.Id.of_string (Printf.sprintf "%s~%d" (Names.Id.to_string id) ctxid) in
+        add_ctx_id id id';
+        tacst_ctxM := Names.Id.Map.add id' (typ, pr_typ, body) !tacst_ctxM;
+        id'
+    | Some id' -> id'
+  else (tacst_ctxM := Names.Id.Map.add id (typ, pr_typ, body) !tacst_ctxM; id)
+
+(*
+let add_typ (typ, pr_typ) id =
+  if Names.Id.Map.mem id !tacst_ctx_typM
+  then begin
+    let (typ', pr_typ') = Names.Id.Map.find id !tacst_ctx_typM in
+    if Term.eq_constr typ typ'
+    then id (* (tacst_ctx_typM := Names.Id.Map.add id (typ, pr_typ) !tacst_ctx_typM; id) *)
+    else begin
+      let ctxid = fresh_ctxid() in
+      let id' = Names.Id.of_string (Printf.sprintf "%s~%d" (Names.Id.to_string id) ctxid) in
+      add_ctx_id id id';
+      tacst_ctx_typM := Names.Id.Map.add id' (typ, pr_typ) !tacst_ctx_typM;
+      id'
+    end 
+  end
+  else (tacst_ctx_typM := Names.Id.Map.add id (typ, pr_typ) !tacst_ctx_typM; id)
+*)  
+
+(*
+let with_ids ids =
+  List.map (fun id -> try Names.Id.Map.find id !tacst_ctx_idM with Not_found -> id) ids
+*)
 
 let update_var_list_decl env sigma (l, c, typ) =
   let pbody = match c with
@@ -247,9 +339,8 @@ let update_var_list_decl env sigma (l, c, typ) =
         let pb = if isCast c then surround pb else pb in
         Some (c, pp2str pb)
   in
-  List.iter (add_body pbody) l;
-  List.iter (add_typ (typ, pp2str (pr_ltype_env env sigma typ))) l;
-  l
+  List.map (add_ctx (typ, pp2str (pr_ltype_env env sigma typ), pbody)) l
+  (* List.iter (add_body pbody) ids';   (* TODO(deh): is this correct? *) *)
 
 let gs_anon = GenSym.init ()
 let fresh_anon () = GenSym.fresh gs_anon
@@ -265,15 +356,15 @@ let update_rel_decl env sigma decl =
         Names.Id.of_string (Printf.sprintf "ANON%d" x)
     | Name id -> id
   in
-  let _ = 
+  let body = 
     match decl with
-    | LocalAssum _ -> ()
+    | LocalAssum _ -> None
     | LocalDef (_, c, _) ->
         let pb = pr_lconstr_env env sigma c in
         let pb = if isCast c then surround pb else pb in
-        add_body (Some (c, pp2str pb)) id 
+        Some (c, pp2str pb)
   in
-  (id, add_typ (typ, pp2str (pr_ltype_env env sigma typ)) id)
+  (id, add_ctx (typ, pp2str (pr_ltype_env env sigma typ), body) id)
 
 let update_context env sigma =
   let named_ids =
@@ -300,8 +391,9 @@ let initialize_proof () =
   GenSym.reset gs4;
   GenSym.reset gs_constridx;
   GenSym.reset gs_anon;
-  clear_tacst_ctx_typM ();
-  clear_tacst_ctx_bodyM ();
+  GenSym.reset gs_ctxid;
+  clear_tacst_ctx_shadowM ();
+  clear_tacst_ctxM ();
   clear_constr_shareM ();
   clear_tacst_goalM ();
   clear_tacst_low_constrM ()
