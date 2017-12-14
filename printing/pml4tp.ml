@@ -58,9 +58,12 @@ let rec show_arr f sep arr =
   let arr' = Array.map f arr in
   String.concat sep (Array.to_list arr')
 
+let gs_anon = GenSym.init ()
+let fresh_anon () = GenSym.fresh gs_anon
+
 let show_name name =
   match name with
-  | Anonymous -> "$A"
+  | Anonymous ->  let x = fresh_anon () in Printf.sprintf "$A%d" x
   | Name id -> Names.Id.to_string id
 
 let show_evar ev =
@@ -107,7 +110,7 @@ let clear_tacst_low_constrM () = tacst_low_constrM := IntMap.empty
 let dump_low_constrM () = 
   IntMap.iter (fun k v -> print_string (Printf.sprintf "%d: %s\n" k v)) !tacst_low_constrM
 
-
+(* TODO(deh): deprecate me *)
 let constr_to_idx c =
   match ConstrHashtbl.find_opt (!constr_shareM) c with
   | None ->
@@ -116,63 +119,67 @@ let constr_to_idx c =
      v
   | Some v -> v
 
-let with_constr_idx k v =
-  tacst_low_constrM := IntMap.add k v !tacst_low_constrM;
-  k
+let with_constr_idx constr value =
+  let idx = fresh_constridx () in
+  ConstrHashtbl.add (!constr_shareM) constr idx;
+  tacst_low_constrM := IntMap.add idx value !tacst_low_constrM;
+  idx
 
-let rec share_constr c =
-  let idx = constr_to_idx c in
-  match kind_of_term c with
-  | Rel i -> with_constr_idx idx (Printf.sprintf "R %d" i)
-  | Var id -> with_constr_idx idx (Printf.sprintf "V %s" (string_of_id id))
-  | Meta mv -> with_constr_idx idx (Printf.sprintf "M %d" mv)
-  | Evar (exk, cs) -> 
-      let idxs = (share_constrs cs) in
-      with_constr_idx idx (Printf.sprintf "E %d [%s]" (show_evar exk) idxs)
-  | Sort sort -> with_constr_idx idx (Printf.sprintf "S %s" (string_of_ppcmds (Univ.Universe.pr (Sorts.univ_of_sort sort))))
-  | Cast (c, ck, t) ->
-      let idx1 = share_constr c in
-      let idx2 = share_constr t in
-      with_constr_idx idx (Printf.sprintf "CA %d %s %d" idx1 (share_cast_kind ck) idx2)
-  | Prod (name, t1, t2) ->
-      let idx1 = share_constr t1 in
-      let idx2 = share_constr t2 in
-      with_constr_idx idx (Printf.sprintf "P %s %d %d" (show_name name) idx1 idx2)
-  | Lambda (name, t, c) -> 
-      let idx1 = (share_constr t) in
-      let idx2 = (share_constr c) in 
-      with_constr_idx idx (Printf.sprintf "L %s %d %d" (show_name name) idx1 idx2)
-  | LetIn (name, c1, t, c2) ->
-      let idx1 = (share_constr c1) in
-      let idx2 = (share_constr t) in  
-      let idx3 = (share_constr c2) in  
-      with_constr_idx idx (Printf.sprintf "LI %s %d %d %d" (show_name name) idx1 idx2 idx3)
-  | App (c, cs) -> 
-      let idx1 = (share_constr c) in
-      let idxs = (share_constrs cs) in
-      with_constr_idx idx (Printf.sprintf "A %d [%s]" idx1 idxs)
-  | Const (const, ui) -> 
-      with_constr_idx idx (Printf.sprintf "C %s [%s]" (Names.Constant.to_string const) (share_universe_instance ui))
-  | Ind (ind, ui) ->
-      let (mutind, pos) = share_inductive ind in
-      with_constr_idx idx (Printf.sprintf "I %s %d [%s]" mutind pos (share_universe_instance ui))
-  | Construct ((ind, conid), ui) ->
-      let (mutind, pos) = share_inductive ind in
-      with_constr_idx idx (Printf.sprintf "CO %s %d %d [%s]" mutind pos conid (share_universe_instance ui))
-  | Case (ci, c1, c2, cs) ->
-      let idx1 = share_constr c1 in
-      let idx2 = share_constr c2 in
-      let idxs = share_constrs cs in
-      with_constr_idx idx (Printf.sprintf "CS [%s] %d %d [%s]" (share_case_info ci) idx1 idx2 idxs)
-  | Fix ((iarr, i), pc) ->
-      let (ns, ts, cs) = share_prec_declaration pc in
-      with_constr_idx idx (Printf.sprintf "F [%s] %d [%s] [%s] [%s]" (share_int_arr iarr) i ns ts cs)
-  | CoFix (i, pc) -> 
-      let (ns, ts, cs) = share_prec_declaration pc in
-      with_constr_idx idx (Printf.sprintf "CF %d [%s] [%s] [%s]" i ns ts cs)
-  | Proj (proj, c) -> 
-      let idx1 = share_constr c in
-      with_constr_idx idx (Printf.sprintf "PJ %s %d" (Names.Projection.to_string proj) idx1)
+let rec share_constr constr =
+  match ConstrHashtbl.find_opt (!constr_shareM) constr with
+  | Some idx -> idx
+  | None -> 
+      match kind_of_term constr with
+      | Rel i -> with_constr_idx constr (Printf.sprintf "R %d" i)
+      | Var id -> with_constr_idx constr (Printf.sprintf "V %s" (string_of_id id))
+      | Meta mv -> with_constr_idx constr (Printf.sprintf "M %d" mv)
+      | Evar (exk, cs) -> 
+          let idxs = (share_constrs cs) in
+          with_constr_idx constr (Printf.sprintf "E %d [%s]" (show_evar exk) idxs)
+      | Sort sort -> with_constr_idx constr (Printf.sprintf "S %s" (string_of_ppcmds (Univ.Universe.pr (Sorts.univ_of_sort sort))))
+      | Cast (c, ck, t) ->
+          let idx1 = share_constr c in
+          let idx2 = share_constr t in
+           with_constr_idx constr (Printf.sprintf "CA %d %s %d" idx1 (share_cast_kind ck) idx2)
+      | Prod (name, t1, t2) ->
+          let idx1 = share_constr t1 in
+          let idx2 = share_constr t2 in
+          with_constr_idx constr (Printf.sprintf "P %s %d %d" (show_name name) idx1 idx2)
+      | Lambda (name, t, c) -> 
+          let idx1 = (share_constr t) in
+          let idx2 = (share_constr c) in 
+          with_constr_idx constr (Printf.sprintf "L %s %d %d" (show_name name) idx1 idx2)
+      | LetIn (name, c1, t, c2) ->
+          let idx1 = (share_constr c1) in
+          let idx2 = (share_constr t) in  
+          let idx3 = (share_constr c2) in  
+          with_constr_idx constr (Printf.sprintf "LI %s %d %d %d" (show_name name) idx1 idx2 idx3)
+      | App (c, cs) -> 
+          let idx1 = (share_constr c) in
+          let idxs = (share_constrs cs) in
+          with_constr_idx constr (Printf.sprintf "A %d [%s]" idx1 idxs)
+      | Const (const, ui) -> 
+          with_constr_idx constr (Printf.sprintf "C %s [%s]" (Names.Constant.to_string const) (share_universe_instance ui))
+      | Ind (ind, ui) ->
+          let (mutind, pos) = share_inductive ind in
+          with_constr_idx constr (Printf.sprintf "I %s %d [%s]" mutind pos (share_universe_instance ui))
+      | Construct ((ind, conid), ui) ->
+          let (mutind, pos) = share_inductive ind in
+          with_constr_idx constr (Printf.sprintf "CO %s %d %d [%s]" mutind pos conid (share_universe_instance ui))
+      | Case (ci, c1, c2, cs) ->
+          let idx1 = share_constr c1 in
+          let idx2 = share_constr c2 in
+          let idxs = share_constrs cs in
+          with_constr_idx constr (Printf.sprintf "CS [%s] %d %d [%s]" (share_case_info ci) idx1 idx2 idxs)
+      | Fix ((iarr, i), pc) ->
+          let (ns, ts, cs) = share_prec_declaration pc in
+          with_constr_idx constr (Printf.sprintf "F [%s] %d [%s] [%s] [%s]" (share_int_arr iarr) i ns ts cs)
+      | CoFix (i, pc) -> 
+          let (ns, ts, cs) = share_prec_declaration pc in
+          with_constr_idx constr (Printf.sprintf "CF %d [%s] [%s] [%s]" i ns ts cs)
+      | Proj (proj, c) -> 
+          let idx1 = share_constr c in
+          with_constr_idx constr (Printf.sprintf "PJ %s %d" (Names.Projection.to_string proj) idx1)
 and share_constrs cs =
   show_arr (fun c -> string_of_int (share_constr c)) " " cs
 and share_cast_kind ck =
@@ -224,25 +231,6 @@ let dump_pretty_tacst_ctx_bodyM () =
     | Some (_, pp_body) -> print_string (Printf.sprintf "%s: %s\n" (Names.Id.to_string k) pp_body)) !tacst_ctxM
 
 
-(*
-(* Types in the tactic state *)
-let tacst_ctx_typM = ref Names.Id.Map.empty
-let clear_tacst_ctx_typM () = tacst_ctx_typM := Names.Id.Map.empty
-let dump_shared_tacst_ctx_typM () =
-  Names.Id.Map.iter (fun k (v, _) -> print_string (Printf.sprintf "%s: %d\n" (Names.Id.to_string k) (share_constr v))) !tacst_ctx_typM
-let dump_pretty_tacst_ctx_typM () =
-  Names.Id.Map.iter (fun k (_, str) -> print_string (Printf.sprintf "%s: %s\n" (Names.Id.to_string k) str)) !tacst_ctx_typM
-
-
-(* Expression bodies in the tactic state *)
-let tacst_ctx_bodyM = ref Names.Id.Map.empty
-let clear_tacst_ctx_bodyM () = tacst_ctx_bodyM := Names.Id.Map.empty
-let dump_shared_tacst_ctx_bodyM () =
-  Names.Id.Map.iter (fun k (v, _) -> print_string (Printf.sprintf "%s: %d\n" (Names.Id.to_string k) (share_constr v))) !tacst_ctx_bodyM
-let dump_pretty_tacst_ctx_bodyM () =
-  Names.Id.Map.iter (fun k (_, str) -> print_string (Printf.sprintf "%s: %s\n" (Names.Id.to_string k) str)) !tacst_ctx_bodyM
-*)
-
 (* Goals in the tactic state *)
 let tacst_goalM = ref IntMap.empty
 let clear_tacst_goalM () = tacst_goalM := IntMap.empty
@@ -258,13 +246,6 @@ let dump_pretty_tacst_goalM () =
 
 let gs_ctxid = GenSym.init ()
 let fresh_ctxid () = GenSym.fresh gs_ctxid
-
-(*
-let add_body c id =
-  match c with
-  | None -> ()
-  | Some c -> tacst_ctx_bodyM := Names.Id.Map.add id c !tacst_ctx_bodyM
-*)
 
 (* Note(deh): 
  * Take care of shadowing when the same local identifier (in a different proof branch)
@@ -308,29 +289,6 @@ let add_ctx (typ, pr_typ, body) id =
     | Some id' -> id'
   else (tacst_ctxM := Names.Id.Map.add id (typ, pr_typ, body) !tacst_ctxM; id)
 
-(*
-let add_typ (typ, pr_typ) id =
-  if Names.Id.Map.mem id !tacst_ctx_typM
-  then begin
-    let (typ', pr_typ') = Names.Id.Map.find id !tacst_ctx_typM in
-    if Term.eq_constr typ typ'
-    then id (* (tacst_ctx_typM := Names.Id.Map.add id (typ, pr_typ) !tacst_ctx_typM; id) *)
-    else begin
-      let ctxid = fresh_ctxid() in
-      let id' = Names.Id.of_string (Printf.sprintf "%s~%d" (Names.Id.to_string id) ctxid) in
-      add_ctx_id id id';
-      tacst_ctx_typM := Names.Id.Map.add id' (typ, pr_typ) !tacst_ctx_typM;
-      id'
-    end 
-  end
-  else (tacst_ctx_typM := Names.Id.Map.add id (typ, pr_typ) !tacst_ctx_typM; id)
-*)  
-
-(*
-let with_ids ids =
-  List.map (fun id -> try Names.Id.Map.find id !tacst_ctx_idM with Not_found -> id) ids
-*)
-
 let update_var_list_decl env sigma (l, c, typ) =
   let pbody = match c with
     | None -> None
@@ -340,20 +298,14 @@ let update_var_list_decl env sigma (l, c, typ) =
         Some (c, pp2str pb)
   in
   List.map (add_ctx (typ, pp2str (pr_ltype_env env sigma typ), pbody)) l
-  (* List.iter (add_body pbody) ids';   (* TODO(deh): is this correct? *) *)
-
-let gs_anon = GenSym.init ()
-let fresh_anon () = GenSym.fresh gs_anon
 
 let update_rel_decl env sigma decl =
   let open Context.Rel.Declaration in
   let na = get_name decl in
   let typ = get_type decl in
-  let id = 
+  let id =
     match na with
-    | Anonymous -> 
-        let x = fresh_anon () in
-        Names.Id.of_string (Printf.sprintf "ANON%d" x)
+    | Anonymous -> Names.Id.of_string (show_name na)
     | Name id -> id
   in
   let body = 
@@ -381,6 +333,93 @@ let update_context env sigma =
 
 
 (* ************************************************************************** *)
+(* New context printing *)
+
+(* Note(deh): 
+ * 
+ * 1. Tactic state is list of pairs of identifiers and expression integers (from sharing)
+ *    x1 5, x2 10, x3 2, ... {!} 4
+ *
+ * 2. Pretty-print information
+ *    tacst_ctx_ppM: int -> pp_str  (map shared id to pretty-print string)
+ *)
+
+let tacst_ctx_ppM = ref IntMap.empty
+let clear_tacst_ctx_ppM () = tacst_ctx_ppM := IntMap.empty
+let add_tacst_ctx_ppM key value = tacst_ctx_ppM := IntMap.add key value !tacst_ctx_ppM
+let dump_pretty_tacst_ctx_typM () =
+  let f k v =
+    match v with
+    | (pp_typ, _) -> print_string (Printf.sprintf "%d: %s\n" k pp_typ)
+  in
+  IntMap.iter f !tacst_ctx_ppM
+let dump_pretty_tacst_ctx_bodyM () =
+  let f k v =
+    match v with
+    | (_, Some pp_body) -> print_string (Printf.sprintf "%d: %s\n" k pp_body)
+    | (_, None) -> ()
+  in
+  IntMap.iter f !tacst_ctx_ppM
+
+
+let show_ctx_ldecl (typ, pr_typ, body) id =
+  match body with
+  | Some (body, pp_body) ->
+      let typ_id = share_constr typ in 
+      let body_id = share_constr body in
+      add_tacst_ctx_ppM typ_id (pr_typ, Some pp_body);
+      Printf.sprintf "%s %d %d" (Names.Id.to_string id) typ_id body_id
+      (* (id, typ_id, Some body_id) *)
+  | None ->
+      let typ_id = share_constr typ in
+      add_tacst_ctx_ppM typ_id (pr_typ, None);
+      Printf.sprintf "%s %d" (Names.Id.to_string id) typ_id
+      (* (id, typ_id, None) *)
+
+let show_var_list_decl env sigma (l, c, typ) =
+  let pbody = match c with
+    | None -> None
+    | Some c ->
+        let pb = pr_lconstr_env env sigma c in
+        let pb = if isCast c then surround pb else pb in
+        Some (c, pp2str pb)
+  in
+  List.map (show_ctx_ldecl (typ, pp2str (pr_ltype_env env sigma typ), pbody)) l
+
+let show_rel_decl env sigma decl =
+  let open Context.Rel.Declaration in
+  let na = get_name decl in
+  let typ = get_type decl in
+  let id = 
+    match na with
+    | Anonymous -> Names.Id.of_string (show_name na)
+    | Name id -> id
+  in
+  let body = 
+    match decl with
+    | LocalAssum _ -> None
+    | LocalDef (_, c, _) ->
+        let pb = pr_lconstr_env env sigma c in
+        let pb = if isCast c then surround pb else pb in
+        Some (c, pp2str pb)
+  in
+  show_ctx_ldecl (typ, pp2str (pr_ltype_env env sigma typ), body) id
+
+let show_context env sigma =
+  let named_ids =
+    Context.NamedList.fold
+      (fun decl ids -> let ids' = show_var_list_decl env sigma decl in ids' @ ids)
+      (Termops.compact_named_context (Environ.named_context env)) ~init:[]
+  in
+  let rel_ids = 
+    Environ.fold_rel_context
+      (fun env decl acc -> let r = show_rel_decl env sigma decl in r::acc)
+      env ~init:[]
+  in
+  show_ls (fun x -> x) ", " (named_ids @ rel_ids)
+
+
+(* ************************************************************************** *)
 (* Begin/End Proof *)
 
 let initialize_proof () =
@@ -392,13 +431,28 @@ let initialize_proof () =
   GenSym.reset gs_constridx;
   GenSym.reset gs_anon;
   GenSym.reset gs_ctxid;
+  clear_tacst_ctx_ppM ();
+  clear_tacst_goalM ();
+  clear_constr_shareM ();
+  clear_tacst_low_constrM ()
+  (*
   clear_tacst_ctx_shadowM ();
   clear_tacst_ctxM ();
   clear_constr_shareM ();
   clear_tacst_goalM ();
   clear_tacst_low_constrM ()
+  *)
 
 let finalize_proof () =
+  print_string "Constrs\n";
+  dump_low_constrM ();
+  print_string "PrTyps\n";
+  dump_pretty_tacst_ctx_typM ();
+  print_string "PrBods\n";
+  dump_pretty_tacst_ctx_bodyM ();
+  print_string "PrGls\n";
+  dump_pretty_tacst_goalM ()
+  (*
   print_string "Typs\n";
   dump_shared_tacst_ctx_typM ();
   print_string "Bods\n";
@@ -411,6 +465,7 @@ let finalize_proof () =
   dump_pretty_tacst_ctx_bodyM ();
   print_string "PrGls\n";
   dump_pretty_tacst_goalM ()
+  *)
 
 let rec show_vernac_typ_exp vt ve =
   match vt with
