@@ -260,9 +260,11 @@ let ml4tp_print_tactic mode (call : Loc.t * ltac_call_kind) extra uid =
     Proofview.numgoals >>= fun numgoals ->
     if numgoals == 0 
     then (
-      print_string (Printf.sprintf "bg(ts) {!} %d {!} %s {!} %s {!} %s {!} %s\n" uid mode name lck sloc);
-      print_string ("ngs=0\n");
-      print_string "en(ts)\n";
+      Pml4tp.ml4tp_write (Printf.sprintf "bg(ts) {!} %d {!} %s {!} %s {!} %s {!} %s\n" uid mode name lck sloc);
+      Pml4tp.ml4tp_write ("ngs=0\n");
+      Pml4tp.ml4tp_write "en(ts)\n";
+      Pml4tp.dump_low_incr_constrM();
+      Pml4tp.ml4tp_flush();
       Proofview.tclUNIT ()
     )
     else (
@@ -288,11 +290,13 @@ let ml4tp_print_tactic mode (call : Loc.t * ltac_call_kind) extra uid =
                    (pr_goal_concl_style_env env sigma concl)
         in
         *)
-          print_string (Printf.sprintf "bg(ts) {!} %d {!} %s {!} %s {!} %s {!} %s\n" uid mode name lck sloc) ;
-          print_string (Printf.sprintf "%d {!} %s {!} %d\n" numgoals full_tac gid);
-          print_string tacst;
-          print_string "\n";
-          print_string "en(ts)\n";
+          Pml4tp.ml4tp_write (Printf.sprintf "bg(ts) {!} %d {!} %s {!} %s {!} %s {!} %s\n" uid mode name lck sloc) ;
+          Pml4tp.ml4tp_write (Printf.sprintf "%d {!} %s {!} %d\n" numgoals full_tac gid);
+          Pml4tp.ml4tp_write tacst;
+          Pml4tp.ml4tp_write "\n";
+          Pml4tp.ml4tp_write "en(ts)\n";
+          Pml4tp.dump_low_incr_constrM();
+          Pml4tp.ml4tp_flush();
           Proofview.tclUNIT ()
       end })
 
@@ -1611,7 +1615,7 @@ and tactic_of_value ist vle =
       (*
       let deh_kludge_tac tac =
         match TacStore.get ist.extra f_ml4tp with
-        | Some msg -> Proofview.tclUNIT (print_string msg) <*> tac
+        | Some msg -> Proofview.tclUNIT (Pml4tp.ml4tp_write msg) <*> tac
         | None -> Proofview.tclUNIT () <*> tac
       in
       *)
