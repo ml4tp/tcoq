@@ -120,3 +120,5 @@ val lift_constr_tac_to_ml_tac : Id.t option list ->
 
 val default_ist : unit -> Geninterp.interp_sign
 (** Empty ist with debug set on the current value. *)
+
+val ml4tp_wrap_catchfail_tac : 'a -> unit Proofview.tactic -> string -> Tacexpr.glob_tactic_expr option -> unit Proofview.tactic
