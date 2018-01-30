@@ -238,4 +238,11 @@ val debug : bool -> unit
  * "Unset SsrMatchingProfiling" to get timings *)
 val profile : bool -> unit
 
+
+val show_term : (char * glob_constr_and_expr) -> string
+val show_pattern : ((char * glob_constr_and_expr), (char * glob_constr_and_expr)) ssrpattern -> string
+val show_cpattern : cpattern -> string 
+val show_rpattern : rpattern -> string
+
+
 (* eof *)

@@ -1381,7 +1381,39 @@ ARGUMENT EXTEND ssrpatternarg
   GLOB_PRINTED BY pr_ssrpatternarg_glob
 | [ rpattern(pat) ] -> [ pat ]
 END
-  
+
+
+(* ============= *)
+(* ML4TP *)
+(* TODO *) 
+
+let show_term (_, (c, _)) =
+  (* Printf.sprintf "\"%s\"" (Pp.string_of_ppcmds (pr_term c)) *)
+  Pml4tp.show_glob_constr c
+
+let show_cpattern cp =
+  show_term cp
+  (* Printf.sprintf "\"%s\"" (Pp.string_of_ppcmds (pr_cpattern cp)) *)
+
+let show_pattern = function
+  | T t ->
+      Printf.sprintf "(T %s)" (show_term t)
+  | In_T t ->
+      Printf.sprintf "(IT %s)" (show_term t)
+  | X_In_T (x,t) ->
+      Printf.sprintf "(XT %s %s)" (show_term x) (show_term t)
+  | In_X_In_T (x,t) ->
+      Printf.sprintf "(IXT %s %s)" (show_term x) (show_term t)
+  | E_In_X_In_T (e,x,t) ->
+      Printf.sprintf "(EIXT %s %s %s)" (show_term e) (show_term x) (show_term t)
+  | E_As_X_In_T (e,x,t) ->
+      Printf.sprintf "(EAXT %s %s %s)" (show_term e) (show_term x) (show_term t)
+
+let show_rpattern rp = show_pattern rp
+(* let _ = Pml4tp.declare_extra_genarg_showrule1 wit_ssrrule_ne show_rule *)
+(* ============= *)
+
+
 let pf_merge_uc uc gl =
   re_sig (sig_it gl) (Evd.merge_universe_context (project gl) uc)
 

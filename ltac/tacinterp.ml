@@ -669,6 +669,7 @@ let ml4tp_print_tactic kludge mode (call : Loc.t * ltac_call_kind) extra uid =
         let sigma = project gl in
         let concl = Tacmach.New.pf_nf_concl gl in
         (* NOTE(deh): conclusion before ctx to get more sharing? *)
+        
         let concl_id = Pml4tp.share_constr concl in
         let ctx = Pml4tp.show_context env sigma in
         let _ = Pml4tp.add_goal concl_id env sigma concl in
@@ -680,15 +681,24 @@ let ml4tp_print_tactic kludge mode (call : Loc.t * ltac_call_kind) extra uid =
           | None -> ""
           | Some tac -> Pp.string_of_ppcmds (Pptactic.pr_glob_tactic env tac)
         in
-        (* NOTE(deh): should print out notation stuff cuz it has the asts. *)
-        (*
         let ast_tac =
+          let show_ast_tac tac' =
+            (* Pml4tp.clear_grefs (); *)
+            (* Pml4tp.clear_lvars (); *)
+            Pml4tp.set_kludge_env env;
+            Pml4tp.show_tac tac'
+            (*
+            let tac'' = Pml4tp.show_tac tac' in        
+            let grefs = Pml4tp.show_grefs () in
+            let lvars = Pml4tp.show_lvars () in
+            Printf.sprintf "%s {!} %s {!} %s" tac'' grefs lvars
+            *)
+          in
           match (snd call, extra, kludge) with
-          | (LtacAtomCall _, Some tac, Some f) -> Pml4tp.show_tac tac
-          | (LtacMLCall _, Some tac, Some f) -> Pml4tp.show_tac tac
+          | (LtacAtomCall _, Some tac, Some _) -> show_ast_tac tac
+          | (LtacNotationCall _, Some tac, Some _) -> show_ast_tac tac
           | _ -> "" 
         in
-        *)
         (* NOTE(deh): printing out ASTs for something that looks like the below
         let goal = pr_context_of env sigma ++ fnl () ++
                    str "============================" ++ fnl () ++
@@ -696,7 +706,7 @@ let ml4tp_print_tactic kludge mode (call : Loc.t * ltac_call_kind) extra uid =
         in
         *)
           Pml4tp.ml4tp_write (Printf.sprintf "bg(ts) {!} %d {!} %s {!} %s {!} %s {!} %s\n" uid mode name lck sloc) ;
-          Pml4tp.ml4tp_write (Printf.sprintf "%d {!} %s {!} %d\n" numgoals full_tac gid);
+          Pml4tp.ml4tp_write (Printf.sprintf "%d {!} %s {!} %s {!} %d\n" numgoals full_tac ast_tac gid);
           Pml4tp.ml4tp_write tacst;
           Pml4tp.ml4tp_write "\n";
           Pml4tp.ml4tp_write "en(ts)\n";
