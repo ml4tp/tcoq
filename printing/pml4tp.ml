@@ -1102,10 +1102,6 @@ and show_tac_arr tacs =
 
 
 
-
-
-
-
 (* ************************************************************************** *)
 (* Junk *)
 
@@ -1125,73 +1121,3 @@ let show_red_expr_gen show_a show_b show_c reg =
   | CbvVm _ -> ""
   | CbvNative _ -> ""
 *)
-
-(* NOTE(deh): Hack to record globals encountered *)
-(*
-module StrSet = Set.Make(struct type t = string let compare = compare end)
-let grefs = ref StrSet.empty
-let clear_grefs () = grefs := StrSet.empty
-let show_grefs () =
-  show_ls (fun x -> x) ", " (StrSet.elements !grefs)
-(* NOTE(deh): Hack to record local variables encountered *)
-let lvars = ref Names.Idset.empty
-let clear_lvars () = lvars := Names.Idset.empty
-let show_lvars () =
-  show_ls show_id ", " (Names.Idset.elements !lvars)
-*)
-
-(*
-let rec fvs_glob_constr gc =
-  match gc with
-  | GRef (l, gr, _) -> 
-      grefs := StrSet.add (show_global_reference gr) (!grefs);
-      Names.Idset.empty
-  | GVar (l, id) -> Names.Idset.singleton id
-  | GEvar (l, en, args) -> Names.Idset.empty
-  | GPatVar (l, (b, pv)) -> Names.Idset.singleton pv
-  | GApp (l, gc, gcs) -> Names.Idset.union (fvs_glob_constr gc) (fvs_glob_constrs gcs)
-  | GLambda (l, n, bk, gc1, gc2) ->
-      let fvs = Names.Idset.union (fvs_glob_constr gc1) (fvs_glob_constr gc2) in
-      remove_name n fvs
-  | GProd (l, n, bk, gc1, gc2) ->
-      let fvs = Names.Idset.union (fvs_glob_constr gc1) (fvs_glob_constr gc2) in
-      remove_name n fvs
-  | GLetIn (l, n, gc1, gc2) ->
-      Names.Idset.union (fvs_glob_constr gc1) (remove_name n (fvs_glob_constr gc2))
-  | GCases (l, cs, m_gc, tups, ccs) ->
-      let f (loc, ids, cps, gc) = 
-        List.fold_left (fun acc id -> Names.Idset.remove id acc) (fvs_glob_constr gc) ids
-      in
-      List.fold_left (fun acc cc -> Names.Idset.union (f cc) acc) Names.Idset.empty ccs
-  | GLetTuple (l, ns, arg, gc1, gc2) ->
-      let fvs = List.fold_left (fun acc name -> remove_name name acc) (fvs_glob_constr gc2) ns in
-      Names.Idset.union (fvs_glob_constr gc1) fvs
-  | GIf (l, gc, (n, m_gc), gc2, gc3) ->
-      Names.Idset.union (Names.Idset.union (fvs_glob_constr gc) (fvs_glob_constr gc2)) (fvs_glob_constr gc3)
-  | GRec (l, fk, ids, gdss, gcs1, gcs2) ->
-      let fvs = Names.Idset.union (fvs_glob_constr_arr gcs1) (fvs_glob_constr_arr gcs2) in
-      Array.fold_left (fun acc id -> Names.Idset.remove id acc) fvs ids
-  | GSort (l, gsort) ->
-      Names.Idset.empty
-  | GHole (l, k, ipne, m_gga) ->
-      Names.Idset.empty
-  | GCast (l, gc, gc_ty) ->
-      Names.Idset.union (fvs_glob_constr gc) (fvs_cast_type gc_ty)
-and fvs_glob_constrs gcs =
-  List.fold_left (fun acc gc -> Names.Idset.union (fvs_glob_constr gc) acc) Names.Idset.empty gcs
-and fvs_glob_constr_arr gcs =
-  Array.fold_left (fun acc gc -> Names.Idset.union (fvs_glob_constr gc) acc) Names.Idset.empty gcs
-
-and remove_name name fvs =
-  match name with
-  | Names.Anonymous -> fvs
-  | Names.Name id -> Names.Idset.remove id fvs
-
-and fvs_cast_type ct = 
-  match ct with
-  | CastConv a -> fvs_glob_constr a
-  | CastVM a -> fvs_glob_constr a
-  | CastCoerce -> Names.Idset.empty
-  | CastNative a -> fvs_glob_constr a
-*)
-
