@@ -208,32 +208,6 @@ type +'a tactic = 'a Proof.t
 
 (** Applies a tactic to the current proofview. *)
 let apply env t sp =
-  let rec deh_print_ls sep print_fn ls =
-    match ls with
-    | [] -> ()
-    | hd::[] -> print_fn hd
-    | hd::tl -> print_fn hd; print_string sep; deh_print_ls sep print_fn tl
-  in
-  let deh_print_evar ev = print_string (string_of_int (Evar.repr ev)) in
-  let deh_print_proofview sp = 
-    print_string "proofview{";
-    print_string "solution: ";
-    print_string (Pp.string_of_ppcmds (Evd.pr_evar_map None sp.solution));
-    print_string "; comb: ";
-    deh_print_ls ", " deh_print_evar sp.comb;
-    print_string "; shelf: ";
-    deh_print_ls ", " deh_print_evar sp.shelf;
-    print_string "}\n"
-  in
-  let deh_print_status (b, evs1, evs2) =
-    print_string "status{";
-    print_string (string_of_bool b);
-    print_string "; ";
-    deh_print_ls ", " deh_print_evar evs1;
-    print_string "; ";
-    deh_print_ls ", " deh_print_evar evs2;
-    print_string "}"
-  in
   let open Logic_monad in
   let ans = Proof.repr (Proof.run t false (sp,env)) in
   let ans = Logic_monad.NonLogical.run ans in
@@ -243,15 +217,6 @@ let apply env t sp =
     let (status, gaveup) = status in
     let status = (status, state.shelf, gaveup) in
     let state = { state with shelf = [] } in
-    (* deh(status: bool * Evar.t list * Evar.t list) *)
-    (* deh(state: Proofview_monad.proofview *)
-    (*
-    print_string "DEH(RESULT APPLY)";
-    deh_print_status status;
-    Environ.deh_print_env 2 env;
-    deh_print_proofview state;
-    print_string "DEH(END APPLY)\n";
-    *)
     r, state, status, Trace.to_tree info
 
 

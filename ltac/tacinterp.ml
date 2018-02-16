@@ -1676,26 +1676,8 @@ and tactic_of_value ist vle =
       let ist = {
         lfun = lfun;
         extra = TacStore.set ist.extra f_trace []; } in
-      (*
-      let deh_kludge_tac tac =
-        match TacStore.get ist.extra f_ml4tp with
-        | Some msg -> Proofview.tclUNIT (Pml4tp.ml4tp_write msg) <*> tac
-        | None -> Proofview.tclUNIT () <*> tac
-      in
-      *)
       let tac = name_if_glob appl (eval_tactic ist t) in
       Profile_ltac.do_profile "tactic_of_value" trace (catch_error_tac trace tac)
-  (*
-  | VFun (appl,trace,lfun,[Some n1; Some n2],t) ->
-      if String.equal (Names.string_of_id n1) "DEH_KLUDGE"
-      then
-        let ist = {
-        lfun = lfun;
-        extra = TacStore.set ist.extra f_trace []; } in
-        let tac = name_if_glob appl (eval_tactic ist t) in
-        Profile_ltac.do_profile "tactic_of_value" trace (catch_error_tac trace tac) 
-      else Tacticals.New.tclZEROMSG (str "A fully applied tactic is expected.")
-  *)
   | (VFun _|VRec _) -> Tacticals.New.tclZEROMSG (str "A fully applied tactic is expected.")
   else if has_type vle (topwit wit_tactic) then
     let tac = out_gen (topwit wit_tactic) vle in
