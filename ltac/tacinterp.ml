@@ -686,16 +686,8 @@ let ml4tp_print_tactic kludge mode (call : Loc.t * ltac_call_kind) extra uid =
         in
         let ast_tac =
           let show_ast_tac tac' =
-            (* Pml4tp.clear_grefs (); *)
-            (* Pml4tp.clear_lvars (); *)
             Pml4tp.set_kludge_env env;
             Pml4tp.show_tac tac'
-            (*
-            let tac'' = Pml4tp.show_tac tac' in        
-            let grefs = Pml4tp.show_grefs () in
-            let lvars = Pml4tp.show_lvars () in
-            Printf.sprintf "%s {!} %s {!} %s" tac'' grefs lvars
-            *)
           in
           match (snd call, extra, kludge) with
           | (LtacAtomCall _, Some tac, Some _) -> show_ast_tac tac
@@ -740,7 +732,6 @@ let ml4tp_wrap_tac' ist tac call extra call_id =
   in
     Proofview.Goal.goals >>= fun glms ->
     Proofview.tclDISPATCHL glms >>= fun gls ->
-    (* (Evd.evar -> 'a -> 'b -> 'b Proof.t) -> 'b -> 'a list -> 'b Proof.t *)
     Proofview.ml4tp_fold_left2_goal (fun ev _ _ -> tac' ev) () gls <*>
     Proofview.tclUNIT ()
 
@@ -756,7 +747,6 @@ let ml4tp_catch_error_tac ist call_trace tac call extra =
 
 let ml4tp_wrap_catchfail_tac ist tac name extra =
   let loc = dloc in 
-  (* let s = Names.KerName.make2 Names.ModPath.initial (Names.mk_label name) in *)
   let dp = DirPath.make [Names.Id.of_string "ml4tp"] in
   let s = Names.KerName.make2 (Names.ModPath.MPfile dp) (Names.mk_label name) in
   let call = (loc, LtacNotationCall s) in
@@ -814,13 +804,6 @@ let interp_gen kind ist allow_patvar flags env sigma (c,ce) =
   (* spiwack: to avoid unnecessary modifications of tacinterp, as this
      function already use effect, I call [run] hoping it doesn't mess
      up with any assumption. *)
-  (*
-  let computation = 
-    Proofview.tclLIFT (db_constr (curr_debug ist) env c) >>= fun () ->
-    ml4tp_print_tactic call >>= fun () ->
-    Proofview.tclUNIT ()
-  in
-  *)
   Proofview.NonLogical.run (db_constr (curr_debug ist) env c);
   let _ = Proofview.apply env (ml4tp_print_tactic None _ML4TP_AF call None (-1)) dummy_proofview in
   (evd,c)
@@ -1420,15 +1403,15 @@ and eval_tactic ist tac : unit Proofview.tactic =
       Tacticals.New.tclTHENS3PARTS (interp_tactic ist t1)
 	(Array.map (interp_tactic ist) tf) (interp_tactic ist t) (Array.map (interp_tactic ist) tl)
   | TacDo (n,tac) ->
-      ml4tp_wrap_catchfail_tac (Some (ml4tp_kludge ist)) (Tacticals.New.tclDO (interp_int_or_var ist n) (interp_tactic ist tac)) "TacDo" (Some (TacDo (n, tac)))
       (* Tacticals.New.tclDO (interp_int_or_var ist n) (interp_tactic ist tac) *)
+      ml4tp_wrap_catchfail_tac (Some (ml4tp_kludge ist)) (Tacticals.New.tclDO (interp_int_or_var ist n) (interp_tactic ist tac)) "TacDo" (Some (TacDo (n, tac)))
   | TacTimeout (n,tac) -> Tacticals.New.tclTIMEOUT (interp_int_or_var ist n) (interp_tactic ist tac)
   | TacTime (s,tac) -> Tacticals.New.tclTIME s (interp_tactic ist tac)
   | TacTry tac -> Tacticals.New.tclTRY (interp_tactic ist tac)
   | TacRepeat tac -> Tacticals.New.tclREPEAT (interp_tactic ist tac)
   | TacOr (tac1,tac2) ->
-      ml4tp_wrap_catchfail_tac (Some (ml4tp_kludge ist)) (Tacticals.New.tclOR (interp_tactic ist tac1) (interp_tactic ist tac2)) "TacOr" (Some (TacOr (tac1, tac2)))
       (* Tacticals.New.tclOR (interp_tactic ist tac1) (interp_tactic ist tac2) *)
+      ml4tp_wrap_catchfail_tac (Some (ml4tp_kludge ist)) (Tacticals.New.tclOR (interp_tactic ist tac1) (interp_tactic ist tac2)) "TacOr" (Some (TacOr (tac1, tac2)))
   | TacOnce tac ->
       Tacticals.New.tclONCE (interp_tactic ist tac)
   | TacExactlyOnce tac ->
@@ -1439,12 +1422,14 @@ and eval_tactic ist tac : unit Proofview.tactic =
         (fun () -> interp_tactic ist tt)
         (fun () -> interp_tactic ist te)
   | TacOrelse (tac1,tac2) ->
-      ml4tp_wrap_catchfail_tac (Some (ml4tp_kludge ist)) (Tacticals.New.tclORELSE (interp_tactic ist tac1) (interp_tactic ist tac2)) "TacOrelse" (Some (TacOrelse (tac1, tac2)))
       (* Tacticals.New.tclORELSE (interp_tactic ist tac1) (interp_tactic ist tac2) *)
-  | TacFirst l -> (* Tacticals.New.tclFIRST (List.map (interp_tactic ist) l) *)
+      ml4tp_wrap_catchfail_tac (Some (ml4tp_kludge ist)) (Tacticals.New.tclORELSE (interp_tactic ist tac1) (interp_tactic ist tac2)) "TacOrelse" (Some (TacOrelse (tac1, tac2)))
+  | TacFirst l ->
+      (* Tacticals.New.tclFIRST (List.map (interp_tactic ist) l) *)
       let f tac = ml4tp_wrap_catchfail_tac (Some (ml4tp_kludge ist)) (interp_tactic ist tac) "TacFirstIn" (Some tac) in
       ml4tp_wrap_catchfail_tac (Some (ml4tp_kludge ist)) (Tacticals.New.tclFIRST (List.map f l)) "TacFirst" (Some (TacFirst l))
-  | TacSolve l -> (* Tacticals.New.tclSOLVE (List.map (interp_tactic ist) l) *)
+  | TacSolve l ->
+      (* Tacticals.New.tclSOLVE (List.map (interp_tactic ist) l) *)
       let f tac = ml4tp_wrap_catchfail_tac (Some (ml4tp_kludge ist)) (interp_tactic ist tac) "TacSolveIn" (Some tac) in
       ml4tp_wrap_catchfail_tac (Some (ml4tp_kludge ist)) (Tacticals.New.tclSOLVE (List.map f l)) "TacSolve" (Some (TacSolve l))
   | TacComplete tac -> Tacticals.New.tclCOMPLETE (interp_tactic ist tac)
@@ -1458,7 +1443,6 @@ and eval_tactic ist tac : unit Proofview.tactic =
       let (ids, body) = Tacenv.interp_alias s in
       let (>>=) = Ftactic.bind in
       let interp_vars = Ftactic.List.map (fun v -> interp_tacarg ist v) l in
-      (* let uid = Pml4tp.fresh_callid() in *)
       let tac l' =
         let addvar x v accu = Id.Map.add x v accu in
         let lfun = List.fold_right2 addvar ids l' ist.lfun in
@@ -1488,19 +1472,12 @@ and eval_tactic ist tac : unit Proofview.tactic =
       let call = (loc, LtacNotationCall s) in
       let open Proofview.Notations in
       ml4tp_wrap_tac (Some (ml4tp_kludge ist)) (Ftactic.run tac (fun () -> Proofview.tclUNIT ())) call (Some (TacAlias (loc,s,l)))
-      (*
-      Proofview.tclIFCATCH
-        (ml4tp_print_tactic _ML4TP_BF call None uid <*> Ftactic.run tac (fun _ -> Proofview.tclUNIT ()))
-        (fun uid2 -> ml4tp_print_tactic _ML4TP_AF call None uid)
-        (fun (e, info) -> ml4tp_print_tactic _ML4TP_DEAD call None uid <*> Proofview.tclZERO ~info e)
-      *)
   | TacML (loc,opn,l) ->
       let call = (loc,LtacMLCall tac) in
       push_trace call ist (Some (TacML (loc,opn,l))) >>= fun trace ->
       let ist = { ist with extra = TacStore.set ist.extra f_trace trace; } in
       let tac = Tacenv.interp_ml_tactic opn in
       let args = Ftactic.List.map_right (fun a -> interp_tacarg ist a) l in
-      (* let f ist = Names.Id.Map.iter (fun k v -> print_string (Printf.sprintf "FOOBAR: %s" (Names.Id.to_string k))) ist.lfun in *)
       let tac args =
         let name () = Pptactic.pr_extend (fun v -> print_top_val () v) 0 opn args in
         Proofview.Trace.name_tactic name (ml4tp_catch_error_tac (Some (ml4tp_kludge ist)) trace (tac args ist) call (Some (TacML (loc,opn,l))))
@@ -1535,7 +1512,6 @@ and interp_ltac_reference uid loc' mustbetac ist r : Val.t Ftactic.t =
       let open Ftactic in
       Ftactic.lift (push_trace loc_info ist None) >>= fun trace ->
       let extra = TacStore.set extra f_trace trace in
-      (* let extra = TacStore.set extra f_ml4tp "HELLO" in *)
       let ist = { lfun = Id.Map.empty; extra = extra; } in
       let appl = GlbAppl[r,[]] in
       Ftactic.lift (ml4tp_print_tactic None _ML4TP_BF loc_info None uid) <*>
