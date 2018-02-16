@@ -146,7 +146,6 @@ let f_avoid_ids : Id.t list TacStore.field = TacStore.field ()
 (* ids inherited from the call context (needed to get fresh ids) *)
 let f_debug : debug_info TacStore.field = TacStore.field ()
 let f_trace : ltac_trace TacStore.field = TacStore.field ()
-let f_ml4tp : string TacStore.field = TacStore.field ()
 
 (* Signature for interpretation: val_interp and interpretation functions *)
 type interp_sign = Geninterp.interp_sign = {
