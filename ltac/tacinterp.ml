@@ -642,12 +642,15 @@ let ml4tp_show_ltac_call_kind lck =
   | LtacNameCall _ -> "Name"
   | LtacAtomCall _ -> "Atom"
   | LtacVarCall _ -> "Var"
-  | LtacConstrInterp _ -> "Constr"
+  | LtacConstrInterp (c, _) ->
+      let env = Global.env () in
+      Pml4tp.set_kludge_env env;
+      Printf.sprintf "Constr(%s)" (Pml4tp.show_glob_constr c)
 
 let ml4tp_print_tactic kludge mode (call : Loc.t * ltac_call_kind) extra uid =
   match snd call with
-  | LtacVarCall _ -> Proofview.tclUNIT ()
-  | LtacConstrInterp _ -> Proofview.tclUNIT ()
+  (* | LtacVarCall (_, tac') -> Proofview.tclUNIT () *)
+  (* | LtacConstrInterp _ -> Proofview.tclUNIT () *)
   | _ ->
     let name = Profile_ltac.string_of_call (snd call) in
     let loc = fst call in
@@ -697,8 +700,17 @@ let ml4tp_print_tactic kludge mode (call : Loc.t * ltac_call_kind) extra uid =
           match (snd call, extra, kludge) with
           | (LtacAtomCall _, Some tac, Some _) -> show_ast_tac tac
           | (LtacNotationCall _, Some tac, Some _) -> show_ast_tac tac
+          | (LtacNameCall r, _, _) -> show_ast_tac (Tacenv.interp_ltac r)
+          (* | (LtacVarCall (_, tac'), _, _) -> Printf.sprintf "VAR(%s)" (Pp.string_of_ppcmds (Pptactic.pr_glob_tactic env tac')) *)
+          (* | (LtacConstrInterp (c, _), _, _) -> Printf.sprintf "CONSTR(%s)" (Pml4tp.show_glob_constr c) *)
           | _ -> "" 
         in
+        (*
+        let concl_glob =
+          let avoid =ids_of_context env in
+          Detyping.detype ~lax:false true avoid env sigma concl
+        in
+        *)
         (* NOTE(deh): printing out ASTs for something that looks like the below
         let goal = pr_context_of env sigma ++ fnl () ++
                    str "============================" ++ fnl () ++
@@ -708,6 +720,7 @@ let ml4tp_print_tactic kludge mode (call : Loc.t * ltac_call_kind) extra uid =
           Pml4tp.ml4tp_write (Printf.sprintf "bg(ts) {!} %d {!} %s {!} %s {!} %s {!} %s\n" uid mode name lck sloc) ;
           Pml4tp.ml4tp_write (Printf.sprintf "%d {!} %s {!} %s {!} %d\n" numgoals full_tac ast_tac gid);
           Pml4tp.ml4tp_write tacst;
+          (* Pml4tp.ml4tp_write (Printf.sprintf "HERE %s" (Pml4tp.show_glob_constr concl_glob)); *)
           Pml4tp.ml4tp_write "\n";
           Pml4tp.ml4tp_write "en(ts)\n";
           Pml4tp.dump_low_incr_constrM();
@@ -1487,6 +1500,7 @@ and eval_tactic ist tac : unit Proofview.tactic =
       let ist = { ist with extra = TacStore.set ist.extra f_trace trace; } in
       let tac = Tacenv.interp_ml_tactic opn in
       let args = Ftactic.List.map_right (fun a -> interp_tacarg ist a) l in
+      (* let f ist = Names.Id.Map.iter (fun k v -> print_string (Printf.sprintf "FOOBAR: %s" (Names.Id.to_string k))) ist.lfun in *)
       let tac args =
         let name () = Pptactic.pr_extend (fun v -> print_top_val () v) 0 opn args in
         Proofview.Trace.name_tactic name (ml4tp_catch_error_tac (Some (ml4tp_kludge ist)) trace (tac args ist) call (Some (TacML (loc,opn,l))))

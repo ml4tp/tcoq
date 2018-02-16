@@ -14,15 +14,24 @@ open Constrexpr
 open Genarg
 
 open CErrors
-(* open Util *)
+
 
 (* [Note] 
  *
  * Contains functionality for ML4TP. Prints out the tactic state of a Coq proof.
  * We output a "shared" representation of a Coq tactic state.
  *   1. Low-level format of expressions uses sharing
- *   2. Low-level format of tactic states just outputs identifiers and goal index
+ *   2. Low-level format of tactic states outputs identifiers, types as shared
+ *      expressions, and shared goal
+ * 
+ * We may have been able to use Coq-SerAPI, but I don't think it handles
+ *   1. Outputting of shared representation
+ *   2. Breaking up of semicolons
+ *
+ * I have no idea why using a hashtable doesn't speed up compared to hashmap version.
+ * I commented out the hashtable version.
  *)
+
 
 
 (* ************************************************************************** *)
@@ -34,6 +43,7 @@ let dump_ch =
   | None -> stdout
 let ml4tp_write s = Printf.fprintf dump_ch "%s" s
 let ml4tp_flush () = flush dump_ch
+
 
 
 (* ************************************************************************** *)
@@ -66,6 +76,11 @@ let fresh_gs3 () = GenSym.fresh gs3
 
 let gs4 = GenSym.init ()
 let fresh_gs4 () = GenSym.fresh gs4
+
+
+(* NOTE(deh): does this have any uses? *)
+let kludge_env = ref Environ.empty_env
+let set_kludge_env env = kludge_env := env
 
 
 
@@ -109,6 +124,7 @@ let show_or_var f ov =
   | ArgArg x -> Printf.sprintf "(A %s)" (f x )
   | ArgVar (loc, id) -> Printf.sprintf "(V %s)" (show_id id)
 
+
 (* Other *)
 
 let replace input output =
@@ -146,6 +162,8 @@ let tacst_low_constrM = ref (IntMap.empty)
 let clear_tacst_low_constrM () = tacst_low_constrM := IntMap.empty
 let dump_low_constrM () = 
   IntMap.iter (fun k v -> ml4tp_write (Printf.sprintf "%d: %s\n" k v)) !tacst_low_constrM
+
+(* NOTE(deh): switch for hashtable *)
 (*
 let tacst_low_constrM = IntTbl.create 4000
 let clear_tacst_low_constrM () = IntTbl.clear tacst_low_constrM
@@ -157,6 +175,7 @@ let with_constr_idx constr value =
   let idx = fresh_constridx () in
   ConstrHashtbl.add (constr_shareM) constr idx;
   tacst_low_constrM := IntMap.add idx value !tacst_low_constrM;
+  (* NOTE(deh): switch for hashtable *)
   (* IntTbl.add tacst_low_constrM idx value; *)
   idx
 
@@ -241,6 +260,7 @@ and share_case_info ci =
 let show_constr c = string_of_int (share_constr c)
 
 
+
 (* ************************************************************************** *)
 (* Goals printing *)
 
@@ -251,20 +271,22 @@ let add_goal cid env sigma concl =
 (* NOTE(deh): No print because it's in shareM *)
 let dump_pretty_tacst_goalM () = 
   IntMap.iter (fun k v -> ml4tp_write (Printf.sprintf "%d: %s\n" k v)) !tacst_goalM
+
+(* NOTE(deh): switch for hashtable *)
 (*
 let tacst_goalM = IntTbl.create 500
 let clear_tacst_goalM () = IntTbl.clear tacst_goalM
 let add_goal cid env sigma concl =
   IntTbl.add tacst_goalM cid (pp2str (pr_goal_concl_style_env env sigma concl))
-(* NOTE(deh): No print because it's in shareM *)
 let dump_pretty_tacst_goalM () = 
   IntTbl.iter (fun k v -> ml4tp_write (Printf.sprintf "%d: %s\n" k v)) tacst_goalM
 *)
 
+
 (* ************************************************************************** *)
 (* Context printing *)
 
-(* Note(deh): 
+(* NOTE(deh): 
  * 
  * 1. Tactic state is list of pairs of identifiers and expression integers (from sharing)
  *    x1 5, x2 10, x3 2, ... {!} 4
@@ -289,6 +311,8 @@ let dump_pretty_tacst_ctx_bodyM () =
     | (_, None) -> ()
   in
   IntMap.iter f !tacst_ctx_ppM
+
+(* NOTE(deh): switch for hashtable *)
 (*
 let tacst_ctx_ppM = IntTbl.create 500
 let clear_tacst_ctx_ppM () = IntTbl.clear tacst_ctx_ppM
@@ -367,6 +391,14 @@ let show_context env sigma =
 (* ************************************************************************** *)
 (* Incremental printing *)
 
+(* NOTE(deh): 
+ * 
+ * For interactive proof-building, we need to output the shared representation
+ * table after each proof step, not just at the end. Of course, We output only
+ * the new entries.
+ *)
+
+
 (* Set to true if you want to have incremental output *)
 let f_incout = ref true
 let set_incout b = f_incout := b
@@ -389,9 +421,11 @@ let dump_low_incr_constrM () =
   then
     (ml4tp_write "bg(inc)\n";
      IntMap.iter f !tacst_low_constrM;
+     (* NOTE(deh): switch for hashtable *)
      (* IntTbl.iter f tacst_low_constrM; *)
      ml4tp_write "en(inc)\n")
   else ()
+
 
 
 (* ************************************************************************** *)
@@ -405,7 +439,6 @@ let initialize_proof () =
   GenSym.reset gs4;
   GenSym.reset gs_constridx;
   GenSym.reset gs_anon;
-  (* GenSym.reset gs_ctxid; *)
   clear_tacst_ctx_ppM ();
   clear_tacst_goalM ();
   clear_constr_shareM ();
@@ -450,9 +483,13 @@ let rec show_vernac_typ_exp vt ve =
 (* Glob_constr printing *)
 
 (* Note(deh): 
+ *
+ * We need this layer because Coq tactics use constr_expr/glob_constr.
+ *
  * 1. [constr_expr] is what the user writes
  * 2. [glob_constr] is desugared, but without types (i.e., no inference).
  * 3. [constr] is Coq kernel representation of Gallina terms
+ *
  *)
 
 let show_sexpr_ls show ls =
@@ -471,72 +508,6 @@ let rec show_global_reference gr =
       Printf.sprintf "(IR %s %d)" (Names.MutInd.to_string mi) i
   | ConstructRef ((mi, i), j) ->
       Printf.sprintf "(TR %s %d %d)" (Names.MutInd.to_string mi) i j
-
-(* NOTE(deh): Hack to record globals encountered *)
-module StrSet = Set.Make(struct type t = string let compare = compare end)
-let grefs = ref StrSet.empty
-let clear_grefs () = grefs := StrSet.empty
-let show_grefs () =
-  show_ls (fun x -> x) ", " (StrSet.elements !grefs)
-(* NOTE(deh): Hack to record local variables encountered *)
-let lvars = ref Names.Idset.empty
-let clear_lvars () = lvars := Names.Idset.empty
-let show_lvars () =
-  show_ls show_id ", " (Names.Idset.elements !lvars)
-
-let rec fvs_glob_constr gc =
-  match gc with
-  | GRef (l, gr, _) -> 
-      grefs := StrSet.add (show_global_reference gr) (!grefs);
-      Names.Idset.empty
-  | GVar (l, id) -> Names.Idset.singleton id
-  | GEvar (l, en, args) -> Names.Idset.empty
-  | GPatVar (l, (b, pv)) -> Names.Idset.singleton pv
-  | GApp (l, gc, gcs) -> Names.Idset.union (fvs_glob_constr gc) (fvs_glob_constrs gcs)
-  | GLambda (l, n, bk, gc1, gc2) ->
-      let fvs = Names.Idset.union (fvs_glob_constr gc1) (fvs_glob_constr gc2) in
-      remove_name n fvs
-  | GProd (l, n, bk, gc1, gc2) ->
-      let fvs = Names.Idset.union (fvs_glob_constr gc1) (fvs_glob_constr gc2) in
-      remove_name n fvs
-  | GLetIn (l, n, gc1, gc2) ->
-      Names.Idset.union (fvs_glob_constr gc1) (remove_name n (fvs_glob_constr gc2))
-  | GCases (l, cs, m_gc, tups, ccs) ->
-      let f (loc, ids, cps, gc) = 
-        List.fold_left (fun acc id -> Names.Idset.remove id acc) (fvs_glob_constr gc) ids
-      in
-      List.fold_left (fun acc cc -> Names.Idset.union (f cc) acc) Names.Idset.empty ccs
-  | GLetTuple (l, ns, arg, gc1, gc2) ->
-      let fvs = List.fold_left (fun acc name -> remove_name name acc) (fvs_glob_constr gc2) ns in
-      Names.Idset.union (fvs_glob_constr gc1) fvs
-  | GIf (l, gc, (n, m_gc), gc2, gc3) ->
-      Names.Idset.union (Names.Idset.union (fvs_glob_constr gc) (fvs_glob_constr gc2)) (fvs_glob_constr gc3)
-  | GRec (l, fk, ids, gdss, gcs1, gcs2) ->
-      let fvs = Names.Idset.union (fvs_glob_constr_arr gcs1) (fvs_glob_constr_arr gcs2) in
-      Array.fold_left (fun acc id -> Names.Idset.remove id acc) fvs ids
-  | GSort (l, gsort) ->
-      Names.Idset.empty
-  | GHole (l, k, ipne, m_gga) ->
-      Names.Idset.empty
-  | GCast (l, gc, gc_ty) ->
-      Names.Idset.union (fvs_glob_constr gc) (fvs_cast_type gc_ty)
-and fvs_glob_constrs gcs =
-  List.fold_left (fun acc gc -> Names.Idset.union (fvs_glob_constr gc) acc) Names.Idset.empty gcs
-and fvs_glob_constr_arr gcs =
-  Array.fold_left (fun acc gc -> Names.Idset.union (fvs_glob_constr gc) acc) Names.Idset.empty gcs
-
-and remove_name name fvs =
-  match name with
-  | Names.Anonymous -> fvs
-  | Names.Name id -> Names.Idset.remove id fvs
-
-and fvs_cast_type ct = 
-  match ct with
-  | CastConv a -> fvs_glob_constr a
-  | CastVM a -> fvs_glob_constr a
-  | CastCoerce -> Names.Idset.empty
-  | CastNative a -> fvs_glob_constr a
-
 
 let show_cast_type show ct = 
   match ct with
@@ -557,17 +528,24 @@ let show_glob_sort gs =
 
 let rec show_intro_pattern_expr show ipe =
   match ipe with
-  | IntroForthcoming b -> Printf.sprintf "(F %b)" b
-  | IntroNaming ipne -> Printf.sprintf "(N %s)" (show_intro_pattern_naming_expr ipne)
-  | IntroAction ipae -> Printf.sprintf "(A %s)" (show_intro_pattern_action_expr show ipae)
+  | IntroForthcoming b ->
+      Printf.sprintf "(F %b)" b
+  | IntroNaming ipne ->
+      Printf.sprintf "(N %s)" (show_intro_pattern_naming_expr ipne)
+  | IntroAction ipae ->
+      Printf.sprintf "(A %s)" (show_intro_pattern_action_expr show ipae)
 and show_intro_pattern_naming_expr ipne =
   match ipne with
-  | IntroIdentifier id -> Printf.sprintf "(I %s)" (show_id id)
-  | IntroFresh id -> Printf.sprintf "(F %s)" (show_id id)
-  | IntroAnonymous -> "A"
+  | IntroIdentifier id ->
+      Printf.sprintf "(I %s)" (show_id id)
+  | IntroFresh id ->
+      Printf.sprintf "(F %s)" (show_id id)
+  | IntroAnonymous ->
+      "A"
 and show_intro_pattern_action_expr show ipae =
   match ipae with
-  | IntroWildcard -> "W"
+  | IntroWildcard ->
+      "W"
   | IntroOrAndPattern oaipe ->
       Printf.sprintf "(O %s)" (show_or_and_intro_pattern_expr show oaipe)
   | IntroInjection ls ->
@@ -609,14 +587,12 @@ let declare_extra_genarg_showrule wit f g h =
 let declare_extra_genarg_showrule1 wit g =
   declare_extra_genarg_showrule wit (fun _ -> "") g (fun _ -> "")
 
-(* let add_genarg tag (show: Genarg.glevel Genarg.generic_argument -> string) = *)
 let add_genarg tag show =
   let wit = Genarg.make0 tag in
   let tag = Geninterp.Val.create tag in
   let glob ist x = (ist, x) in
   let subst _ x = x in
   let interp ist x = Ftactic.return (Geninterp.Val.Dyn (tag, x)) in
-  (* let gen_pr _ _ _ = pr in *)
   let () = Genintern.register_intern0 wit glob in
   let () = Genintern.register_subst0 wit subst in
   let () = Geninterp.register_interp0 wit interp in
@@ -662,20 +638,43 @@ let rec show_evar_kinds = function
   | Evar_kinds.BinderType name ->
       Printf.sprintf "(B %s)" (show_name name)
   | Evar_kinds.QuestionMark ods ->
-      Printf.sprintf "(Q %s)" "TODO"
+      let f ods =
+        match ods with
+        | Evar_kinds.Define b -> Printf.sprintf "(D %b)" b
+        | Evar_kinds.Expand -> "E"
+      in
+      Printf.sprintf "(Q %s)" (f ods)
   | Evar_kinds.CasesType b ->
       Printf.sprintf "(C %b)" b
-  | Evar_kinds.InternalHole -> "H"
+  | Evar_kinds.InternalHole ->
+      "H"
   | Evar_kinds.TomatchTypeParameter ((mutind, i), j) ->
       Printf.sprintf "(T %s %d %d)" (Names.MutInd.to_string mutind) i j
-  | Evar_kinds.GoalEvar -> "G"
-  | Evar_kinds.ImpossibleCase -> "I"
+  | Evar_kinds.GoalEvar ->
+      "G"
+  | Evar_kinds.ImpossibleCase ->
+      "I"
   | Evar_kinds.MatchingVar (b, id) ->
       Printf.sprintf "(M %b %s)" b (show_id id)
   | Evar_kinds.VarInstance id ->
       Printf.sprintf "(V %s)" (show_id id)
   | Evar_kinds.SubEvar ek ->
       Printf.sprintf "(E %d)" (show_evar ek)
+
+
+let show_case_style csty =
+  match csty with
+  | LetStyle -> "L"
+  | IfStyle -> "I"
+  | LetPatternStyle -> "LP"
+  | MatchStyle -> "M"
+  | RegularStyle -> "R"
+
+
+let show_binding_kind bk =
+  match bk with
+  | Decl_kinds.Explicit -> "E"
+  | Decl_kinds.Implicit -> "I"
 
 
 let rec show_glob_constr gc =
@@ -692,20 +691,20 @@ let rec show_glob_constr gc =
   | GApp (l, gc, gcs) ->
       Printf.sprintf "(A %s %s)" (show_glob_constr gc) (show_glob_constrs gcs)
   | GLambda (l, n, bk, gc1, gc2) ->
-      Printf.sprintf "(L %s %s %s)" (show_name n) (show_glob_constr gc1) (show_glob_constr gc2)
+      Printf.sprintf "(L %s %s %s %s)" (show_name n) (show_binding_kind bk) (show_glob_constr gc1) (show_glob_constr gc2)
   | GProd (l, n, bk, gc1, gc2) ->
-      Printf.sprintf "(P %s %s %s)" (show_name n) (show_glob_constr gc1) (show_glob_constr gc2)
+      Printf.sprintf "(P %s %s %s %s)" (show_name n) (show_binding_kind bk) (show_glob_constr gc1) (show_glob_constr gc2)
   | GLetIn (l, n, gc1, gc2) ->
       Printf.sprintf "(LI %s %s %s)" (show_name n) (show_glob_constr gc1) (show_glob_constr gc2)
-  | GCases (l, cs, m_gc, tups, ccs) ->
-      Printf.sprintf "(C %s %s %s %s)" "TODO" (show_maybe show_glob_constr m_gc) (show_tomatch_tuples tups) (show_case_clauses ccs)
+  | GCases (l, csty, m_gc, tups, ccs) ->
+      Printf.sprintf "(C %s %s %s %s)" (show_case_style csty) (show_maybe show_glob_constr m_gc) (show_tomatch_tuples tups) (show_case_clauses ccs)
   | GLetTuple (l, ns, arg, gc1, gc2) ->
       let f (name, m_gc) = Printf.sprintf "(%s %s)" (show_name name) (show_maybe show_glob_constr m_gc) in
       Printf.sprintf "(LT %s %s %s %s)" (show_sexpr_ls show_name ns) (f arg) (show_glob_constr gc1) (show_glob_constr gc2)
   | GIf (l, gc, (n, m_gc), gc2, gc3) ->
       Printf.sprintf "(I %s %s %s)" (show_glob_constr gc) (show_glob_constr gc2) (show_glob_constr gc3)
   | GRec (l, fk, ids, gdss, gcs1, gcs2) ->
-      Printf.sprintf "(R %s %s %s %s %s)" "TODO" (show_sexpr_arr show_id ids) "TODO" (show_glob_constr_arr gcs1) (show_glob_constr_arr gcs2)
+      Printf.sprintf "(R %s %s %s %s %s)" (show_fix_kind fk) (show_sexpr_arr show_id ids) (show_sexpr_arr (show_sexpr_ls show_glob_decl) gdss) (show_glob_constr_arr gcs1) (show_glob_constr_arr gcs2)
   | GSort (l, gsort) ->
       Printf.sprintf "(S %s)" (show_glob_sort gsort)
   | GHole (l, k, ipne, m_gga) ->
@@ -730,37 +729,51 @@ and show_case_clause (loc, ids, cps, gc) =
 and show_case_clauses ccs =
   show_sexpr_ls show_case_clause ccs
 
+and show_fix_recursion_order fro =
+  match fro with
+  | GStructRec ->
+      "S"
+  | GWfRec gc ->
+      Printf.sprintf "(W %s)" (show_glob_constr gc)
+  | GMeasureRec (gc, m_gc) ->
+      Printf.sprintf "(M %s %s)" (show_glob_constr gc) (show_maybe show_glob_constr m_gc)
+and show_fix_kind fk =
+  match fk with
+  | GFix (ifros, i) ->
+      let f (m_j, fro) = Printf.sprintf "(%s %s)" (show_maybe string_of_int m_j) (show_fix_recursion_order fro) in
+      Printf.sprintf "(F %s %d)" (show_sexpr_arr f ifros) i
+  | GCoFix i ->
+      Printf.sprintf "(C %d)" i
+and show_glob_decl (name, bk, m_c, c) =
+  Printf.sprintf "%s %s %s %s" (show_name name) (show_binding_kind bk) (show_maybe show_glob_constr m_c) (show_glob_constr c)
 
 
 (* ************************************************************************** *)
 (* Ltac printing *)
 
 (* Note(deh): 
+ *
  * A global term is a pair of
  * 1. a [glob_constr]
  * 2. an optional [constr_expr] that the glob_constr came from
+ *
  *)
-let show_gtrm (gc, m_c) =
-  (*
-  let fvs = fvs_glob_constr gc in
-  lvars := Names.Idset.union !lvars fvs; 
-  *)
-  show_glob_constr gc
 
-(*
-let show_red_Expr_gen show_a show_b show_c reg =
-  match reg with
-  | Red b -> Printf.sprintf "Red(%b)" b
-  | Hnf -> "Hnf"
-  | Simpl _ -> ""
-*)
+
+let show_gtrm (gc, m_c) =
+  show_glob_constr gc
 
 let show_may_eval mev =
   match mev with
-  | ConstrEval (r, c) -> Printf.sprintf "(E %s %s)" "TODO" (show_gtrm c)
-  | ConstrContext ((_, id), c) -> Printf.sprintf "(C %s %s)" (show_id id) (show_gtrm c)
-  | ConstrTypeOf c -> Printf.sprintf "(T %s)" (show_gtrm c)
-  | ConstrTerm c -> Printf.sprintf "(M %s)" (show_gtrm c)
+  | ConstrEval (r, c) ->
+      (* NOTE(deh): this TODO isn't necessary as it just tells the type of reduction? *)
+      Printf.sprintf "(E %s %s)" "TODO" (show_gtrm c)
+  | ConstrContext ((_, id), c) ->
+      Printf.sprintf "(C %s %s)" (show_id id) (show_gtrm c)
+  | ConstrTypeOf c ->
+      Printf.sprintf "(T %s)" (show_gtrm c)
+  | ConstrTerm c ->
+      Printf.sprintf "(M %s)" (show_gtrm c)
 
 let show_multi m =
   match m with
@@ -816,9 +829,12 @@ let rec show_destruction_arg show_a (cf, cda) =
   Printf.sprintf "(%s %s)" (show_maybe string_of_bool cf) (show_core_destruction_arg show_a cda)
 and show_core_destruction_arg show_a cda =
   match cda with
-  | ElimOnConstr a -> Printf.sprintf "(C %s)" (show_a a)
-  | ElimOnIdent (loc, id) -> Printf.sprintf "(I %s)" (show_id id)
-  | ElimOnAnonHyp i -> Printf.sprintf "(A %d)" i
+  | ElimOnConstr a ->
+      Printf.sprintf "(C %s)" (show_a a)
+  | ElimOnIdent (loc, id) ->
+      Printf.sprintf "(I %s)" (show_id id)
+  | ElimOnAnonHyp i ->
+      Printf.sprintf "(A %d)" i
 
 
 let rec show_induction_clause (wbs_da, (ml_ipne, movl_oaipe), m_ce) =
@@ -897,21 +913,57 @@ and show_match_context_hyps show_pat hyps =
   | Def ((loc, name), mp1, mp2) ->
       Printf.sprintf "(D %s %s %s)" (show_name name) (show_match_pattern show_pat mp1) (show_match_pattern show_pat mp2)
 
+
 let show_ml_tactic_entry mlen =
   let name = mlen.mltac_name in
   Printf.sprintf "(%s %s %d)" name.mltac_plugin name.mltac_tactic mlen.mltac_index
 
 
-let kludge_env = ref Environ.empty_env
-let set_kludge_env env = kludge_env := env
+let rec show_constr_pattern cp =
+  match cp with
+  | Pattern.PRef gr ->
+      Printf.sprintf "(! %s)" (show_global_reference gr)
+  | Pattern.PVar id ->
+      Printf.sprintf "(V %s)" (show_id id)
+  | Pattern.PEvar (ek, cps) ->
+      Printf.sprintf "(E %d %s)" (show_evar ek) (show_sexpr_arr show_constr_pattern cps)
+  | Pattern.PRel i ->
+      Printf.sprintf "(R %d)" i
+  | Pattern.PApp (cp, cps) ->
+      Printf.sprintf "(A %s %s)" (show_constr_pattern cp) (show_sexpr_arr show_constr_pattern cps)
+  | Pattern.PSoApp (pv, cps) ->
+      Printf.sprintf "(SA %s %s)" (show_constr_pattern cp) (show_sexpr_ls show_constr_pattern cps) 
+  | Pattern.PProj (proj, cp) ->
+      Printf.sprintf "(PJ %s %s)" (Names.Projection.to_string proj) (show_constr_pattern cp)
+  | Pattern.PLambda (name, cp1, cp2) ->
+      Printf.sprintf "(L %s %s %s)" (show_name name) (show_constr_pattern cp1) (show_constr_pattern cp2)
+  | Pattern.PProd (name, cp1, cp2) ->
+      Printf.sprintf "(P %s %s %s)" (show_name name) (show_constr_pattern cp1) (show_constr_pattern cp2)
+  | Pattern.PLetIn (name, cp1, cp2) ->
+      Printf.sprintf "(LI %s %s %s)" (show_name name) (show_constr_pattern cp1) (show_constr_pattern cp2)
+  | Pattern.PSort gs ->
+      Printf.sprintf "(S %s)" (show_glob_sort gs)
+  | Pattern.PMeta m_pv ->
+      Printf.sprintf "(M %s)" (show_maybe show_id m_pv)
+  | Pattern.PIf (cp1, cp2, cp3) ->
+      Printf.sprintf "(I %s %s %s)" (show_constr_pattern cp1) (show_constr_pattern cp2) (show_constr_pattern cp3)
+  | Pattern.PCase (cip, cp1, cp2, ls) ->
+      (* NOTE(deh): this TODO is a case pattern style which isn't necessary? *)
+      let f (i, bs, cp) = Printf.sprintf "(%d %s %s)" i (show_sexpr_ls string_of_bool bs) (show_constr_pattern cp) in
+      Printf.sprintf "(C %s %s %s %s)" "TODO" (show_constr_pattern cp1) (show_constr_pattern cp2) (show_sexpr_ls f ls)
+  | Pattern.PFix fix ->
+      let f ((is, i), rd) = Printf.sprintf "(%s %d %s)" (show_sexpr_arr string_of_int is) i (show_rec_declaration rd) in
+      Printf.sprintf "(F %s)" (f fix)
+  | Pattern.PCoFix cofix ->
+      let f (i, rd) = Printf.sprintf "(%d %s)" i (show_rec_declaration rd) in
+      Printf.sprintf "(CF %s)" (f cofix)
+and show_rec_declaration (names, tys, cs) = 
+  Printf.sprintf "(%s %s %s)" (show_sexpr_arr show_name names) (show_sexpr_arr show_constr tys) (show_sexpr_arr show_constr cs) 
+
 
 let rec show_tactic_arg ta =
   match ta with
   | TacGeneric ga ->
-      (*
-      let foo = Pptactic.pr_glb_generic (!kludge_env) ga in
-      Printf.sprintf "(Generic %s)" (Pp.string_of_ppcmds foo)
-      *)
       Printf.sprintf "(G %s)" (show_generic_arg ga)
   | ConstrMayEval mev ->
       Printf.sprintf "(ME %s)" (show_may_eval mev)
@@ -961,10 +1013,11 @@ and show_atomic_tac atac =
   | TacInductionDestruct (rf, ef, ics) ->
       Printf.sprintf "(InductionDestruct %b %b %s)" rf ef (show_induction_clause_list ics)
   | TacReduce (reg, ce) ->
+      (* NOTE(deh): this TODO isn't necessary as it just tells the type of reduction? *)
       Printf.sprintf "(Reduce %s %s)" "TODO" (show_clause_expr ce)
   | TacChange (maybe_pat, dtrm, ce) ->
       let f (_, gtrm, cpat) = show_gtrm gtrm in
-      Printf.sprintf "(MutualFix %s %s %s)" (show_maybe f maybe_pat) (show_gtrm dtrm) (show_clause_expr ce)
+      Printf.sprintf "(Change %s %s %s)" (show_maybe f maybe_pat) (show_gtrm dtrm) (show_clause_expr ce)
   | TacRewrite (ef, rargs, ce, maybe_tac) ->
       let f (b, m, barg) = Printf.sprintf "(%b %s %s)" b (show_multi m) (show_with_bindings_arg show_gtrm barg) in
       Printf.sprintf "(Rewrite %b %s %s %s)" ef (show_sexpr_ls f rargs) (show_clause_expr ce) (show_maybe show_tac maybe_tac)
@@ -1027,13 +1080,11 @@ and show_tac tac =
       let f ((loc, id), targ) = Printf.sprintf "(%s %s)" (show_id id) (show_tactic_arg targ) in
       Printf.sprintf "(Let %b %s %s)" rf (show_sexpr_ls f bindings) (show_tac tac)
   | TacMatch (lf, tac, mrules) ->
-      (* TODO *)
-      let f (_, gtrm, cpat) = show_gtrm gtrm in
-      Printf.sprintf "(Match %s %s %s)" (show_lazy_flag lf) (show_tac tac) (show_match_rules f show_tac mrules)
+      let show_pat (bbvs, gtrm, cpat) = Printf.sprintf "(%s %s %s)" (show_sexpr_ls show_id (Id.Set.elements bbvs)) (show_gtrm gtrm) (show_constr_pattern cpat) in
+      Printf.sprintf "(Match %s %s %s)" (show_lazy_flag lf) (show_tac tac) (show_match_rules show_pat show_tac mrules)
   | TacMatchGoal (lf, df, mrules) ->
-      (* TODO *)
-      let f (_, gtrm, cpat) = show_gtrm gtrm in
-      Printf.sprintf "(MatchGoal %s %b %s)" (show_lazy_flag lf) df (show_match_rules f show_tac mrules)
+      let show_pat (bbvs, gtrm, cpat) = Printf.sprintf "(%s %s %s)" (show_sexpr_ls show_id (Id.Set.elements bbvs)) (show_gtrm gtrm) (show_constr_pattern cpat) in
+      Printf.sprintf "(MatchGoal %s %b %s)" (show_lazy_flag lf) df (show_match_rules show_pat show_tac mrules)
   | TacFun (maybe_ids, tac) ->
       Printf.sprintf "(Fun %s %s)" (show_sexpr_ls (show_maybe show_id) maybe_ids) (show_tac tac)
   | TacArg (loc, targ) ->
@@ -1051,485 +1102,95 @@ and show_tac_arr tacs =
 
 
 
+
+
+
+
 (* ************************************************************************** *)
 (* Junk *)
 
 (*
-let rec show_targ targ =
-  match targ with
-  | TacGeneric _ -> Printf.sprintf "Generic(%s)" "TODO"
-  | ConstrMayEval mev -> show_may_eval mev
-  | Reference r -> Printf.sprintf "Reference(%s)" (show_g_reference r)
-  | TacCall (loc, r, targs) -> Printf.sprintf "Call(%s, %s)" (show_g_reference r) (show_targs targs)
-  | TacFreshId sovs -> Printf.sprintf "FreshId(%s)" (brackets (show_ls (fun x -> show_or_var (fun x -> x) x) ", " sovs))
-  | Tacexp tac -> Printf.sprintf "Exp(%s)" (show_tac tac)
-  | TacPretype c -> Printf.sprintf "Pretype(%s)" (show_gtrm c)
-  | TacNumgoals -> "Numgoals"
-and show_targs targs = 
-  brackets (show_ls show_targ ", " targs)
-and show_atac atac =
-  match atac with
-  | TacIntroPattern (ef, ipes) ->
-      let f (loc, ipe) = show_intro_pattern_expr show_gtrm ipe in
-      Printf.sprintf "IntroPattern(%b, %s)" ef (show_ls f ", " ipes)
-  | TacApply (af, ef, bargss, gnm_and_ipe) ->
-      let f (loc, ipe) = show_intro_pattern_expr show_gtrm ipe in
-      let g (gnm, x) = Printf.sprintf "(%s, %s)" (show_gname gnm) (show_maybe f x) in
-      Printf.sprintf "Apply(%b, %b, %s, %s)" af ef (brackets (show_ls (show_with_bindings_arg show_gtrm) ", " bargss)) (show_maybe g gnm_and_ipe)
-  | TacElim (ef, bargs, maybe_wb) -> Printf.sprintf "Elim(%b, %s, %s)" ef (show_with_bindings_arg show_gtrm bargs) (show_maybe (show_with_bindings show_gtrm) maybe_wb)
-  | TacCase (ef, bargs) -> Printf.sprintf "Case(%b, %s)" ef (show_with_bindings_arg show_gtrm bargs)
-  | TacMutualFix (id, i, body) ->
-      let f (id, i, c) = Printf.sprintf "(%s, %d, %s)" (show_id id) i (show_gtrm c) in
-      Printf.sprintf "MutualFix(%s, %d, %s)" (show_id id) i (brackets (show_ls f ", " body))
-  | TacMutualCofix (id, body) ->
-      let f (id, c) = Printf.sprintf "(%s, %s)" (show_id id) (show_gtrm c) in
-      Printf.sprintf "MutualCofix(%s,  %s)" (show_id id) (brackets (show_ls f ", " body))
-  | TacAssert (b, mm_tac, ml_ipe, c) ->
-      Printf.sprintf "Assert(%b, %s, %s, %s)" b (show_maybe (show_maybe show_tac) mm_tac) (show_maybe_located_intro_pattern_naming_expr ml_ipe) (show_gtrm c)
-  | TacGeneralize ls ->
-      let f (wo, name) = Printf.sprintf "(%s, %s)" (show_with_occurrences show_gtrm wo) (show_name name) in
-      Printf.sprintf "Generalize(%s)" (brackets (show_ls f ", " ls))
-  | TacLetTac (name, c, ce, lf, ml_ipe) ->
-      let f (loc, ipne) = show_intro_pattern_naming_expr ipne in
-      Printf.sprintf "LetTac(%s, %s, %s, %b, %s)" (show_name name) (show_gtrm c) (show_clause_expr ce) lf (show_maybe f ml_ipe)
-  | TacInductionDestruct (rf, ef, ics) -> Printf.sprintf "InductionDestruct(%b, %b, %s)" rf ef (show_induction_clause_list ics)
-  | TacReduce (reg, ce) -> Printf.sprintf "Reduce(%s, %s)" "TODO" (show_clause_expr ce)
-  | TacChange (maybe_pat, dtrm, ce) -> Printf.sprintf "MutualFix(%s, %s, %s)" "TODO" (show_gtrm dtrm) (show_clause_expr ce)
-  | TacRewrite (ef, rargs, ce, maybe_tac) -> Printf.sprintf "Rewrite(%b, %s, %s, %s)" ef (brackets (show_ls show_rewrite_arg ", " rargs)) (show_clause_expr ce) (show_maybe show_tac maybe_tac)
-  | TacInversion (is, qhyp) -> Printf.sprintf "Inversion(%s, %s)" (show_inversion_strength is) (show_quantified_hypothesis qhyp)
-and show_induction_clause (wbs_da, (ml_ipne, movl_oaipe), m_ce) =
-  let f (loc, ipne) = show_intro_pattern_naming_expr ipne in
-  let g (loc, oaipe) = show_or_and_intro_pattern_expr show_gtrm oaipe in
-  let g' = show_maybe (show_or_var g) in
-  Printf.sprintf "(%s, %s, %s, %s)" (show_destruction_arg (show_with_bindings show_gtrm) wbs_da) (show_maybe f ml_ipne) (g' movl_oaipe) (show_maybe show_clause_expr m_ce)
-and show_induction_clause_list (ics, m_bs) =
-  Printf.sprintf "(%s, %s)" (brackets (show_ls show_induction_clause ", " ics)) (show_maybe (show_with_bindings show_gtrm) m_bs)
-and show_destruction_arg show_a (cf, cda) =
-  Printf.sprintf "(%s, %s)" (show_maybe string_of_bool cf) (show_core_destruction_arg show_a cda)
-and show_core_destruction_arg show_a cda =
-  match cda with
-  | ElimOnConstr a -> Printf.sprintf "C(%s)" (show_a a)
-  | ElimOnIdent (loc, id) -> Printf.sprintf "I(%s)" (show_id id)
-  | ElimOnAnonHyp i -> Printf.sprintf "A(%d)" i
-and show_maybe_located_intro_pattern_naming_expr ml_ipe =
-  let f (loc, ipe) = show_intro_pattern_expr show_gtrm ipe in
-  show_maybe f ml_ipe
-and show_multi m =
-  match m with
-  | Precisely i -> Printf.sprintf "P(%d)" i
-  | UpTo i -> Printf.sprintf "U(%d)" i
-  | RepeatStar -> "*"
-  | RepeatPlus -> "+"
-and show_rewrite_arg (b, m, barg) =
-  Printf.sprintf "(%b, %s, %s)" b (show_multi m) (show_with_bindings_arg show_gtrm barg)
-and show_ltac_constant lc =
-  Names.KerName.to_string lc
-and show_g_reference gref =
-  show_or_var (fun (loc, lc) -> show_ltac_constant lc) gref
-and show_occurrences_gen f og =
-  match og with
-  | AllOccurrences -> "A"
-  | AllOccurrencesBut ls -> Printf.sprintf "B(%s)" (brackets (show_ls f ", " ls))
-  | NoOccurrences -> "N"
-  | OnlyOccurrences ls -> Printf.sprintf "O(%s)" (brackets (show_ls f ", " ls))
-and show_occurrences_expr oe =
-  show_occurrences_gen show_int_or_var oe
-and show_with_occurrences show_a (oe, a) =
-  Printf.sprintf "(%s, %s)" (show_occurrences_expr oe) (show_a a)
-and show_hyp_location_flag hlf =
-  match hlf with
-  | InHyp -> "H"
-  | InHypTypeOnly -> "T"
-  | InHypValueOnly -> "V"
-and show_hyp_location_expr ((occs, gnm), hlf) =
-  Printf.sprintf "((%s, %s), %s)" (show_occurrences_expr occs) (show_gname gnm) (show_hyp_location_flag hlf)
-and show_clause_expr ce = 
-  Printf.sprintf "(%s, %s)" (show_maybe (fun x -> show_ls show_hyp_location_expr ", " x) ce.onhyps) (show_occurrences_expr ce.concl_occs)
-and show_inversion_kind ik = 
-  match ik with
-  | SimpleInversion -> "S"
-  | FullInversion -> "F"
-  | FullInversionClear -> "FC"
-and show_inversion_strength is =
-  match is with
-  | NonDepInversion (ik, gnms, movl_oaipe) ->
-      let f (loc, oaipe) = show_or_and_intro_pattern_expr show_gtrm oaipe in
-      let g = show_or_var f in
-      Printf.sprintf "NonDep(%s, %s, %s)" (show_inversion_kind ik) (brackets (show_ls show_gname ", " gnms)) (show_maybe g movl_oaipe)
-  | DepInversion (ik, maybe_c, movl_oaipe) ->
-      let f (loc, oaipe) = show_or_and_intro_pattern_expr show_gtrm oaipe in
-      let g = show_or_var f in
-      Printf.sprintf "Dep(%s, %s, %s)" (show_inversion_kind ik) (show_maybe show_gtrm maybe_c) ((show_maybe g movl_oaipe))
-  | InversionUsing (c, gnms) -> Printf.sprintf "Using(%s, %s)" (show_gtrm c) (brackets (show_ls show_gname ", " gnms))
-and show_tac tac : string =
-  match tac with
-  | TacAtom (loc, atac) -> show_atac atac
-  | TacThen (tac1, tac2) -> Printf.sprintf "Then(%s, %s)" (show_tac tac1) (show_tac tac2)
-  | TacDispatch tacs -> Printf.sprintf "Dispatch(%s)" (show_tacs tacs)
-  | TacExtendTac (tacs1, tac, tacs2) -> Printf.sprintf "ExtendTac(%s, %s, %s)" (show_tac_arr tacs1) (show_tac tac) (show_tac_arr tacs2)
-  | TacThens (tac, tacs) -> Printf.sprintf "Thens(%s, %s)" (show_tac tac) (show_tacs tacs)
-  | TacThens3parts (tac1, tac1s, tac2, tac2s) -> Printf.sprintf "Thens3parts(%s, %s, %s, %s)" (show_tac tac1) (show_tac_arr tac1s) (show_tac tac2) (show_tac_arr tac2s)
-  | TacFirst tacs -> Printf.sprintf "First(%s)" (show_tacs tacs)
-  | TacComplete tac -> Printf.sprintf "Complete(%s)" (show_tac tac)
-  | TacSolve tacs -> Printf.sprintf "Solve(%s)" (show_tacs tacs)
-  | TacTry tac -> Printf.sprintf "Try(%s)" (show_tac tac)
-  | TacOr (tac1, tac2) -> Printf.sprintf "Or(%s, %s)" (show_tac tac1) (show_tac tac2)
-  | TacOnce tac -> Printf.sprintf "Once(%s)" (show_tac tac)
-  | TacExactlyOnce tac -> Printf.sprintf "ExactlyOnce(%s)" (show_tac tac)
-  | TacIfThenCatch (tac1, tac2, tac3) -> Printf.sprintf "IfThenCatch(%s, %s, %s)" (show_tac tac1) (show_tac tac2) (show_tac tac3)
-  | TacOrelse (tac1, tac2) -> Printf.sprintf "Orelse(%s, %s)" (show_tac tac1) (show_tac tac2)
-  | TacDo (iov, tac) -> Printf.sprintf "Do(%s, %s)" (show_int_or_var iov) (show_tac tac)
-  | TacTimeout (iov, tac) -> Printf.sprintf "Timeout(%s, %s)" (show_int_or_var iov) (show_tac tac)
-  | TacTime (maybe_str, tac) -> Printf.sprintf "Time(%s, %s)" (show_maybe (fun x -> x) maybe_str) (show_tac tac)
-  | TacRepeat tac -> Printf.sprintf "Repeat(%s)" (show_tac tac)
-  | TacProgress tac -> Printf.sprintf "Progress(%s)" (show_tac tac)
-  | TacShowHyps tac -> Printf.sprintf "ShowHyps(%s)" (show_tac tac)
-  | TacAbstract (tac, maybe_id) -> Printf.sprintf "Do(%s, %s)" (show_tac tac) (show_maybe show_id maybe_id)
-  | TacId msgs -> Printf.sprintf "Id(%s)" (brackets (show_ls show_message_token ", " msgs))
-  | TacFail (gf, iov, msgs) -> Printf.sprintf "Info(%s, %s, %s)" (show_global_flag gf) (show_int_or_var iov) (brackets (show_ls show_message_token ", " msgs))
-  | TacInfo tac -> Printf.sprintf "Info(%s)" (show_tac tac)
-  | TacLetIn (rf, bindings, tac) ->
-      let f ((loc, id), targ) = Printf.sprintf "(%s, %s)" (show_id id) (show_targ targ) in
-      Printf.sprintf "Let(%b, %s, %s)" rf (brackets (show_ls f ", " bindings)) (show_tac tac)
-  | TacMatch (lf, tac, mrules) -> Printf.sprintf "Match(%s, %s, %s)" (show_lazy_flag lf) (show_tac tac) (show_match_rules mrules)
-  | TacMatchGoal (lf, df, mrules) -> Printf.sprintf "MatchGoal(%s, %b, %s)" (show_lazy_flag lf) df (show_match_rules mrules)
-  | TacFun (maybe_ids, tac) -> Printf.sprintf "Fun(%s, %s)" (brackets (show_ls (show_maybe show_id) ", " maybe_ids)) (show_tac tac)
-  | TacArg (loc, targ) -> Printf.sprintf "Arg(%s)" (show_targ targ)
-  | TacSelect (gs, tac) -> Printf.sprintf "Select(%s, %s)" (show_goal_selector gs) (show_tac tac)
-  | TacML (loc, mlen, targs) -> Printf.sprintf "ML(%s, %s)" (show_ml_tactic_entry mlen) (show_targs targs)
-  | TacAlias (loc, kername, targs) -> Printf.sprintf "Alias(%s, %s)" (KerName.to_string kername) (show_targs targs)
-and show_tacs tacs =
-  brackets (show_ls show_tac ", " tacs)
-and show_tac_arr tacs = 
-  brackets (show_arr show_tac ", " tacs)
-and show_match_pattern pat =
-  match pat with
-  | Term c -> show_gtrm c
-  | Subterm (b, maybe_id, c) -> Printf.sprintf "%b %s %s" b (show_maybe show_id maybe_id) (show_gtrm c)
-and show_match_context_hyps hyps =
-  match hyps with
-  | Hyp ((loc, name), pat) -> Printf.sprintf "Hyp(%s, %s)" (show_name name) (show_match_pattern pat)
-  | Def ((loc, name), pat1, pat2) -> Printf.sprintf "Def(%s, %s, %s)" (show_name name) (show_match_pattern pat1) (show_match_pattern pat2)
-and show_match_rule mrule =
-  match mrule with
-  | Pat (hyps, pat, tac) -> Printf.sprintf "Pat(%s, %s, %s)" (brackets (show_ls show_match_context_hyps ", " hyps)) (show_match_pattern pat) (show_tac tac)
-  | All tac -> Printf.sprintf "All(%s)" (show_tac tac)
-and show_match_rules mrules =
-  brackets (show_ls show_match_rule ", " mrules)
-and show_int_or_var iov = 
-  show_or_var string_of_int iov
-and show_lazy_flag lf =
-  match lf with
-  | General -> "G"
-  | Select -> "S"
-  | Once -> "O"
-and show_global_flag gf =
-  match gf with
-  | TacGlobal -> "G"
-  | TacLocal -> "L"
-and show_goal_selector gs =
-  match gs with
-  | SelectNth i -> string_of_int i
-  | SelectList ls -> show_ls (fun (i, j) -> Printf.sprintf "(%d, %d)" i j) ", " ls
-  | SelectId id -> Id.to_string id
-  | SelectAll -> "A"
-and show_message_token mtok = 
-  match mtok with
-  | MsgString s -> s
-  | MsgInt i -> string_of_int i
-  | MsgIdent gnm -> show_gname gnm
-and show_ml_tactic_entry mlen =
-  let name = mlen.mltac_name in
-  Printf.sprintf "(%s, %s, %d)" name.mltac_plugin name.mltac_tactic mlen.mltac_index
+let show_red_expr_gen show_a show_b show_c reg =
+  match reg with
+  | Red b -> Printf.sprintf "(R %b)" b
+  | Hnf -> ""
+  | Simpl _ -> ""
+  | Cbv _ -> ""
+  | Cbn _ -> ""
+  | Lazy _ -> ""
+  | Unfold _ -> ""
+  | Fold _ -> ""
+  | Pattern _ -> ""
+  | ExtraRedExpr _ -> ""
+  | CbvVm _ -> ""
+  | CbvNative _ -> ""
+*)
+
+(* NOTE(deh): Hack to record globals encountered *)
+(*
+module StrSet = Set.Make(struct type t = string let compare = compare end)
+let grefs = ref StrSet.empty
+let clear_grefs () = grefs := StrSet.empty
+let show_grefs () =
+  show_ls (fun x -> x) ", " (StrSet.elements !grefs)
+(* NOTE(deh): Hack to record local variables encountered *)
+let lvars = ref Names.Idset.empty
+let clear_lvars () = lvars := Names.Idset.empty
+let show_lvars () =
+  show_ls show_id ", " (Names.Idset.elements !lvars)
 *)
 
 (*
-let rec show_constr_expr ce =
-  match ce with
-  | CApp (loc, (pf, ce), args) ->
-      let f (ce', _) = show_constr_expr ce' in
-      Printf.sprintf "A(%s, %s)" (show_constr_expr ce) (brackets (show_ls f ", " args))
-  | _ -> "FOO"
+let rec fvs_glob_constr gc =
+  match gc with
+  | GRef (l, gr, _) -> 
+      grefs := StrSet.add (show_global_reference gr) (!grefs);
+      Names.Idset.empty
+  | GVar (l, id) -> Names.Idset.singleton id
+  | GEvar (l, en, args) -> Names.Idset.empty
+  | GPatVar (l, (b, pv)) -> Names.Idset.singleton pv
+  | GApp (l, gc, gcs) -> Names.Idset.union (fvs_glob_constr gc) (fvs_glob_constrs gcs)
+  | GLambda (l, n, bk, gc1, gc2) ->
+      let fvs = Names.Idset.union (fvs_glob_constr gc1) (fvs_glob_constr gc2) in
+      remove_name n fvs
+  | GProd (l, n, bk, gc1, gc2) ->
+      let fvs = Names.Idset.union (fvs_glob_constr gc1) (fvs_glob_constr gc2) in
+      remove_name n fvs
+  | GLetIn (l, n, gc1, gc2) ->
+      Names.Idset.union (fvs_glob_constr gc1) (remove_name n (fvs_glob_constr gc2))
+  | GCases (l, cs, m_gc, tups, ccs) ->
+      let f (loc, ids, cps, gc) = 
+        List.fold_left (fun acc id -> Names.Idset.remove id acc) (fvs_glob_constr gc) ids
+      in
+      List.fold_left (fun acc cc -> Names.Idset.union (f cc) acc) Names.Idset.empty ccs
+  | GLetTuple (l, ns, arg, gc1, gc2) ->
+      let fvs = List.fold_left (fun acc name -> remove_name name acc) (fvs_glob_constr gc2) ns in
+      Names.Idset.union (fvs_glob_constr gc1) fvs
+  | GIf (l, gc, (n, m_gc), gc2, gc3) ->
+      Names.Idset.union (Names.Idset.union (fvs_glob_constr gc) (fvs_glob_constr gc2)) (fvs_glob_constr gc3)
+  | GRec (l, fk, ids, gdss, gcs1, gcs2) ->
+      let fvs = Names.Idset.union (fvs_glob_constr_arr gcs1) (fvs_glob_constr_arr gcs2) in
+      Array.fold_left (fun acc id -> Names.Idset.remove id acc) fvs ids
+  | GSort (l, gsort) ->
+      Names.Idset.empty
+  | GHole (l, k, ipne, m_gga) ->
+      Names.Idset.empty
+  | GCast (l, gc, gc_ty) ->
+      Names.Idset.union (fvs_glob_constr gc) (fvs_cast_type gc_ty)
+and fvs_glob_constrs gcs =
+  List.fold_left (fun acc gc -> Names.Idset.union (fvs_glob_constr gc) acc) Names.Idset.empty gcs
+and fvs_glob_constr_arr gcs =
+  Array.fold_left (fun acc gc -> Names.Idset.union (fvs_glob_constr gc) acc) Names.Idset.empty gcs
 
-(* type glob_constr_and_expr = Glob_term.glob_constr * constr_expr option *)
-let show_dtrm interp (dtrm: glob_constr_and_expr) = 
-  let (gc, m_c) = dtrm in
-  show_constr (interp gc)
-  (* show_maybe (fun c -> show_gconstr (interp c)) m_c *)
-*)
+and remove_name name fvs =
+  match name with
+  | Names.Anonymous -> fvs
+  | Names.Name id -> Names.Idset.remove id fvs
 
-
-
-(*
-let deh_show_vernac_expr ve =
-  match ve with
-  | VernacLoad (_, _) -> (* verbose_flag * string *) "VernacLoad(?, ?)"
-  | VernacTime _ -> "VernacTime"
-  | VernacRedirect _ -> "VernacRedirect"
-  | VernacTimeout _ -> "VernacTimeout"
-  | VernacFail _ -> "VernacFail"
-  | VernacError _ -> "VernacError"
-
-  | VernacSyntaxExtension _ -> "VernacSyntaxExtension"
-  | VernacOpenCloseScope _ -> "VernacOpenCloseScope"
-  | VernacDelimiters _ -> "VernacDelimiters"
-  | VernacBindScope _ -> "VernacBindScope"
-  | VernacInfix _ -> "VernacInfix"
-  | VernacNotation _ -> "VernacNotation"
-  | VernacNotationAddFormat _ -> "VernacNotationAddFormat"
-
-  | VernacDefinition _ -> "VernacDefinition"
-  | VernacStartTheoremProof _ -> "VernacStartTheoremProof"
-  | VernacEndProof _ -> "VernacEndProof"
-  | VernacExactProof _ -> "VernacExactProof"
-  | VernacAssumption _ -> "VernacAssumption"
-  | VernacInductive _ -> "VernacInductive"
-  | VernacFixpoint _ -> "VernacFixpoint"
-  | VernacCoFixpoint _ -> "VernacCoFixpoint"
-  | VernacScheme _ -> "VernacScheme"
-  | VernacCombinedScheme _ -> "VernacCombinedScheme"
-  | VernacUniverse _ -> "VernacUniverse"
-  | VernacConstraint _ -> "VernacConstraint"
-
-  | VernacBeginSection _ -> "VernacBeginSection"
-  | VernacEndSegment _ -> "VernacEndSegment"
-  | VernacRequire _ -> "VernacRequire"
-  | VernacImport _ -> "VernacImport"
-  | VernacCanonical _ -> "VernacCanonical"
-  | VernacCoercion _ -> "VernacCoercion"
-  | VernacIdentityCoercion _ -> "VernacIdentityCoercion"
-  | VernacNameSectionHypSet _ -> "VernacNameSectionHypSet"
-
-  | VernacInstance _ -> "VernacInstance"
-  | VernacContext _ -> "VernacContext"
-  | VernacDeclareInstances _ -> "VernacDeclareInstances"
-  | VernacDeclareClass _ -> "VernacDeclareClass"
-
-  | VernacDeclareModule _ -> "VernacDeclareModule"
-  | VernacDefineModule _ -> "VernacDefineModule"
-  | VernacDeclareModuleType _ -> "VernacDeclareModuleType"
-  | VernacInclude _ -> "VernacInclude"
-
-  | VernacSolveExistential _ -> "VernacSolveExistential"
-
-  | VernacAddLoadPath _ -> "VernacAddLoadPath"
-  | VernacRemoveLoadPath _ -> "VernacRemoveLoadPath"
-  | VernacAddMLPath _ -> "VernacAddMLPath"
-  | VernacDeclareMLModule _ -> "VernacDeclareMLModule"
-  | VernacChdir _ -> "VernacChdir"
-
-  | VernacWriteState _ -> "VernacWriteState"
-  | VernacRestoreState _ -> "VernacRestoreState"
-
-  | VernacResetName _ -> "VernacResetName"
-  | VernacResetInitial -> "VernacResetInitial"
-  | VernacBack _ -> "VernacBack"
-  | VernacBackTo _ -> "VernacBackTo"
-
-  | VernacCreateHintDb _ -> "VernacCreateHintDb"
-  | VernacRemoveHints _ -> "VernacRemoveHints"
-  | VernacHints _ -> "VernacHints"
-  | VernacSyntacticDefinition _ -> "VernacSyntacticDefinition"
-  | VernacDeclareImplicits _ -> "VernacDeclareImplicits"
-  | VernacArguments _ -> "VernacArguments"
-  | VernacArgumentsScope _ -> "VernacArgumentsScope"
-  | VernacReserve _ -> "VernacReserve"
-  | VernacGeneralizable _ -> "VernacGeneralizable"
-  | VernacSetOpacity _ -> "VernacSetOpacity"
-  | VernacSetStrategy _ -> "VernacSetStrategy"
-  | VernacUnsetOption _ -> "VernacUnsetOption"
-  | VernacSetOption _ -> "VernacSetOption"
-  | VernacSetAppendOption _ -> "VernacSetAppendOption"
-  | VernacAddOption _ -> "VernacAddOption"
-  | VernacRemoveOption _ -> "VernacRemoveOption"
-  | VernacMemOption _ -> "VernacMemOption"
-  | VernacPrintOption _ -> "VernacPrintOption"
-  | VernacCheckMayEval _ -> "VernacCheckMayEval"
-  | VernacGlobalCheck _ -> "VernacGlobalCheck"
-  | VernacDeclareReduction _ -> "VernacDeclareReduction"
-  | VernacPrint _ -> "VernacPrint"
-  | VernacSearch _ -> "VernacSearch"
-  | VernacLocate _ -> "VernacLocate"
-  | VernacRegister _ -> "VernacRegister"
-  | VernacComments _ -> "VernacComments"
-
-  | VernacStm _ -> "VernacStm"
-
-  | VernacGoal _ -> "VernacGoal"
-  | VernacAbort _ -> "VernacAbort"
-  | VernacAbortAll -> "VernacAbortAll"
-  | VernacRestart -> "VernacRestart"
-  | VernacUndo _ -> "VernacUndo"
-  | VernacUndoTo _ -> "VernacUndoTo"
-  | VernacBacktrack _ -> "VernacBacktrack"
-  | VernacFocus _ -> "VernacFocus"
-  | VernacUnfocus -> "VernacUnfocus"
-  | VernacUnfocused -> "VernacUnfocused"
-  | VernacBullet _ -> "VernacBullet"
-  | VernacSubproof _ -> "VernacSubproof"
-  | VernacEndSubproof -> "VernacEndSubproof"
-  | VernacShow _ -> "VernacShow"
-  | VernacCheckGuard -> "VernacCheckGuard"
-  | VernacProof _ -> "VernacProof"
-  | VernacProofMode _ -> "VernacProofMode"
-
-  | VernacToplevelControl _ -> "VernacToplevelControl"
-
-  | VernacExtend ((str, i), _) -> "VernacExtend(" ^ str ^ ", " ^ string_of_int i ^ ")"
-
-  | VernacProgram _ -> "VernacProgram"
-  | VernacPolymorphic _ -> "VernacPolymorphic"
-  | VernacLocal _ -> "VernacLocal"
-*)
-
-(*
-let rec deh_show_vernac_type vt =
-  match vt with
-  | VtStartProof (name, _, names) -> Printf.sprintf "VtStartProof(%s, %s)" name (deh_show_names names)
-  | VtSideff (_) -> "VtSideff"
-  | VtQed (_) -> "VtQed"
-  | VtProofStep _ -> "VtProofStep"
-  | VtProofMode (_) -> "VtProofMode"
-  | VtQuery (_, _) -> "VtQuery"
-  | VtStm (_, _) -> "VtStm"
-  | VtUnknown -> "VtUnknown"
-*)
-
-(*
-let constr_to_idx c =
-  match ConstrHashtbl.find_opt (!constr_shareM) c with
-  | None ->
-     let v = fresh_constridx () in
-     ConstrHashtbl.add (!constr_shareM) c v;
-     v
-  | Some v -> v
-*)
-
-(* --------------------------------------- *)
-(* Tactic state sharing *)
-
-(*
-(* Shadowed identifiers in the tactic state *)
-let tacst_ctx_shadowM = ref Names.Id.Map.empty
-let clear_tacst_ctx_shadowM () = tacst_ctx_shadowM := Names.Id.Map.empty
-
-
-(* Contexts in the tactic state *)
-let tacst_ctxM = ref Names.Id.Map.empty
-let clear_tacst_ctxM () = tacst_ctxM := Names.Id.Map.empty
-let dump_shared_tacst_ctx_typM () =
-  Names.Id.Map.iter (fun k (ty, _, _) -> print_string (Printf.sprintf "%s: %d\n" (Names.Id.to_string k) (share_constr ty))) !tacst_ctxM
-let dump_pretty_tacst_ctx_typM () =
-  Names.Id.Map.iter (fun k (_, pp_ty, _) -> print_string (Printf.sprintf "%s: %s\n" (Names.Id.to_string k) pp_ty)) !tacst_ctxM
-let dump_shared_tacst_ctx_bodyM () =
-  Names.Id.Map.iter (fun k (_, _, body) ->
-    match body with
-    | None -> ()
-    | Some (body, _) -> print_string (Printf.sprintf "%s: %d\n" (Names.Id.to_string k) (share_constr body))) !tacst_ctxM
-let dump_pretty_tacst_ctx_bodyM () =
-  Names.Id.Map.iter (fun k (_, _, body) -> 
-    match body with
-    | None -> ()
-    | Some (_, pp_body) -> print_string (Printf.sprintf "%s: %s\n" (Names.Id.to_string k) pp_body)) !tacst_ctxM
-
-
-(* Goals in the tactic state *)
-let tacst_goalM = ref IntMap.empty
-let clear_tacst_goalM () = tacst_goalM := IntMap.empty
-let add_goal cid env sigma concl =
-  tacst_goalM := IntMap.add cid (pp2str (pr_goal_concl_style_env env sigma concl)) !tacst_goalM
-(* NOTE(deh): No print because it's in shareM *)
-let dump_pretty_tacst_goalM () = 
-  IntMap.iter (fun k v -> print_string (Printf.sprintf "%d: %s\n" k v)) !tacst_goalM
-*)
-
-(* --------------------------------------- *)
-(* Update context mappings in a tactic-state *)
-
-(*
-let gs_ctxid = GenSym.init ()
-let fresh_ctxid () = GenSym.fresh gs_ctxid
-
-(* Note(deh): 
- * Take care of shadowing when the same local identifier (in a different proof branch)
- * have different types.
- * 
- * tacst_ctx_idM: id -> [id]       (map identifiers to list of shadowed identifiers)
- * tacst_ctxM: id -> (typ, body)   (map identifier to type and/or body)
- *)
-
-(* Take care of shadowing list *)
-let add_ctx_id id id' =
-  if Names.Id.Map.mem id !tacst_ctx_shadowM
-  then (let ids = Names.Id.Map.find id !tacst_ctx_shadowM in
-        tacst_ctx_shadowM := Names.Id.Map.add id (id' :: ids) !tacst_ctx_shadowM)
-  else tacst_ctx_shadowM := Names.Id.Map.add id [id'] !tacst_ctx_shadowM
-
-(* Get the list of shadowed variables *)
-let find_ctx_id_shadowing id =
-  if Names.Id.Map.mem id !tacst_ctx_shadowM
-  then id :: Names.Id.Map.find id !tacst_ctx_shadowM
-  else [id]
-
-let add_ctx (typ, pr_typ, body) id =
-  if Names.Id.Map.mem id !tacst_ctxM
-  then
-    let ids = find_ctx_id_shadowing id in
-    let f id =
-      match (Names.Id.Map.find id !tacst_ctxM, body) with
-      | ((typ', _, Some (body', _)), Some (body, _)) ->
-          Term.eq_constr typ typ' && Term.eq_constr body body'
-      | ((typ', _, None), None) -> Term.eq_constr typ typ'
-      | _ -> false
-    in
-    match List.find_opt f ids with
-    | None ->
-        let ctxid = fresh_ctxid() in
-        let id' = Names.Id.of_string (Printf.sprintf "%s~%d" (Names.Id.to_string id) ctxid) in
-        add_ctx_id id id';
-        tacst_ctxM := Names.Id.Map.add id' (typ, pr_typ, body) !tacst_ctxM;
-        id'
-    | Some id' -> id'
-  else (tacst_ctxM := Names.Id.Map.add id (typ, pr_typ, body) !tacst_ctxM; id)
-
-let update_var_list_decl env sigma (l, c, typ) =
-  let pbody = match c with
-    | None -> None
-    | Some c ->
-        let pb = pr_lconstr_env env sigma c in
-        let pb = if isCast c then surround pb else pb in
-        Some (c, pp2str pb)
-  in
-  List.map (add_ctx (typ, pp2str (pr_ltype_env env sigma typ), pbody)) l
-
-let update_rel_decl env sigma decl =
-  let open Context.Rel.Declaration in
-  let na = get_name decl in
-  let typ = get_type decl in
-  let id =
-    match na with
-    | Anonymous -> Names.Id.of_string (show_name na)
-    | Name id -> id
-  in
-  let body = 
-    match decl with
-    | LocalAssum _ -> None
-    | LocalDef (_, c, _) ->
-        let pb = pr_lconstr_env env sigma c in
-        let pb = if isCast c then surround pb else pb in
-        Some (c, pp2str pb)
-  in
-  (id, add_ctx (typ, pp2str (pr_ltype_env env sigma typ), body) id)
-
-let update_context env sigma =
-  let named_ids =
-    Context.NamedList.fold
-      (fun decl ids -> let ids' = update_var_list_decl env sigma decl in ids' @ ids)
-      (Termops.compact_named_context (Environ.named_context env)) ~init:[]
-  in
-  let rel_ids = 
-    Environ.fold_rel_context
-      (fun env decl ids -> let (id, _) = update_rel_decl env sigma decl in id::ids)
-      env ~init:[]
-  in named_ids @ rel_ids
+and fvs_cast_type ct = 
+  match ct with
+  | CastConv a -> fvs_glob_constr a
+  | CastVM a -> fvs_glob_constr a
+  | CastCoerce -> Names.Idset.empty
+  | CastNative a -> fvs_glob_constr a
 *)
