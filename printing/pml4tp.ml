@@ -632,7 +632,7 @@ and show_g_reference gref =
   show_or_var (fun (loc, lc) -> show_ltac_constant lc) gref
 
 
-let rec show_evar_kinds = function
+let show_evar_kinds = function
   | Evar_kinds.ImplicitArg (gref, (i, m_id), b) ->
       Printf.sprintf "(A %s %d %s %b)" (show_global_reference gref) i (show_maybe show_id m_id) b
   | Evar_kinds.BinderType name ->
