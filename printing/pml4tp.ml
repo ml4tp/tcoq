@@ -262,224 +262,6 @@ let show_constr c = string_of_int (share_constr c)
 
 
 (* ************************************************************************** *)
-(* Goals printing *)
-
-let tacst_goalM = ref IntMap.empty
-let clear_tacst_goalM () = tacst_goalM := IntMap.empty
-let add_goal cid env sigma concl =
-  tacst_goalM := IntMap.add cid (pp2str (pr_goal_concl_style_env env sigma concl)) !tacst_goalM
-(* NOTE(deh): No print because it's in shareM *)
-let dump_pretty_tacst_goalM () = 
-  IntMap.iter (fun k v -> ml4tp_write (Printf.sprintf "%d: %s\n" k v)) !tacst_goalM
-
-(* NOTE(deh): switch for hashtable *)
-(*
-let tacst_goalM = IntTbl.create 500
-let clear_tacst_goalM () = IntTbl.clear tacst_goalM
-let add_goal cid env sigma concl =
-  IntTbl.add tacst_goalM cid (pp2str (pr_goal_concl_style_env env sigma concl))
-let dump_pretty_tacst_goalM () = 
-  IntTbl.iter (fun k v -> ml4tp_write (Printf.sprintf "%d: %s\n" k v)) tacst_goalM
-*)
-
-
-(* ************************************************************************** *)
-(* Context printing *)
-
-(* NOTE(deh): 
- * 
- * 1. Tactic state is list of pairs of identifiers and expression integers (from sharing)
- *    x1 5, x2 10, x3 2, ... {!} 4
- *
- * 2. Pretty-print information
- *    tacst_ctx_ppM: int -> pp_str  (map shared id to pretty-print string)
- *)
-
-let tacst_ctx_ppM = ref IntMap.empty
-let clear_tacst_ctx_ppM () = tacst_ctx_ppM := IntMap.empty
-let add_tacst_ctx_ppM key value = tacst_ctx_ppM := IntMap.add key value !tacst_ctx_ppM
-let dump_pretty_tacst_ctx_typM () =
-  let f k v =
-    match v with
-    | (pp_typ, _) -> ml4tp_write (Printf.sprintf "%d: %s\n" k pp_typ)
-  in
-  IntMap.iter f !tacst_ctx_ppM
-let dump_pretty_tacst_ctx_bodyM () =
-  let f k v =
-    match v with
-    | (_, Some pp_body) -> ml4tp_write (Printf.sprintf "%d: %s\n" k pp_body)
-    | (_, None) -> ()
-  in
-  IntMap.iter f !tacst_ctx_ppM
-
-(* NOTE(deh): switch for hashtable *)
-(*
-let tacst_ctx_ppM = IntTbl.create 500
-let clear_tacst_ctx_ppM () = IntTbl.clear tacst_ctx_ppM
-let add_tacst_ctx_ppM key value = IntTbl.add tacst_ctx_ppM key value
-let dump_pretty_tacst_ctx_typM () =
-  let f k v =
-    match v with
-    | (pp_typ, _) -> ml4tp_write (Printf.sprintf "%d: %s\n" k pp_typ)
-  in
-  IntTbl.iter f tacst_ctx_ppM
-let dump_pretty_tacst_ctx_bodyM () =
-  let f k v =
-    match v with
-    | (_, Some pp_body) -> ml4tp_write (Printf.sprintf "%d: %s\n" k pp_body)
-    | (_, None) -> ()
-  in
-  IntTbl.iter f tacst_ctx_ppM
-*)
-
-let show_ctx_ldecl (typ, pr_typ, body) id =
-  match body with
-  | Some (body, pp_body) ->
-      let typ_id = share_constr typ in 
-      let body_id = share_constr body in
-      add_tacst_ctx_ppM typ_id (pr_typ, Some pp_body);
-      Printf.sprintf "%s %d %d" (show_id id) typ_id body_id
-  | None ->
-      let typ_id = share_constr typ in
-      add_tacst_ctx_ppM typ_id (pr_typ, None);
-      Printf.sprintf "%s %d" (show_id id) typ_id
-
-let show_var_list_decl env sigma (l, c, typ) =
-  let pbody = match c with
-    | None -> None
-    | Some c ->
-        let pb = pr_lconstr_env env sigma c in
-        let pb = if isCast c then surround pb else pb in
-        Some (c, pp2str pb)
-  in
-  List.map (show_ctx_ldecl (typ, pp2str (pr_ltype_env env sigma typ), pbody)) l
-
-let show_rel_decl env sigma decl =
-  let open Context.Rel.Declaration in
-  let na = get_name decl in
-  let typ = get_type decl in
-  let id = 
-    match na with
-    | Anonymous -> Names.Id.of_string (show_name na)
-    | Name id -> id
-  in
-  let body = 
-    match decl with
-    | LocalAssum _ -> None
-    | LocalDef (_, c, _) ->
-        let pb = pr_lconstr_env env sigma c in
-        let pb = if isCast c then surround pb else pb in
-        Some (c, pp2str pb)
-  in
-  show_ctx_ldecl (typ, pp2str (pr_ltype_env env sigma typ), body) id
-
-let show_context env sigma =
-  let named_ids =
-    Context.NamedList.fold
-      (fun decl ids -> let ids' = show_var_list_decl env sigma decl in ids' @ ids)
-      (Termops.compact_named_context (Environ.named_context env)) ~init:[]
-  in
-  let rel_ids = 
-    Environ.fold_rel_context
-      (fun env decl acc -> let r = show_rel_decl env sigma decl in r::acc)
-      env ~init:[]
-  in
-  show_ls (fun x -> x) ", " (named_ids @ rel_ids)
-
-
-
-(* ************************************************************************** *)
-(* Incremental printing *)
-
-(* NOTE(deh): 
- * 
- * For interactive proof-building, we need to output the shared representation
- * table after each proof step, not just at the end. Of course, We output only
- * the new entries.
- *)
-
-
-(* Set to true if you want to have incremental output *)
-let f_incout = ref true
-let set_incout b = f_incout := b
-
-(* Keep track of outputted shared ASTs *)
-module IntSet = Set.Make(struct type t = int let compare = compare end)
-let outputted_constrS = ref (IntSet.empty)
-let clear_outputted_constrS () = outputted_constrS := IntSet.empty
-let dump_outputted_constrS () =
-  IntSet.iter (fun k -> ml4tp_write (Printf.sprintf "%d " k)) !outputted_constrS
-
-let dump_low_incr_constrM () =
-  let f k v =
-    if IntSet.mem k !outputted_constrS
-    then ()
-    else (outputted_constrS := IntSet.add k !outputted_constrS;
-          ml4tp_write (Printf.sprintf "%d: %s\n" k v))
-  in
-  if !f_incout
-  then
-    (ml4tp_write "bg(inc)\n";
-     IntMap.iter f !tacst_low_constrM;
-     (* NOTE(deh): switch for hashtable *)
-     (* IntTbl.iter f tacst_low_constrM; *)
-     ml4tp_write "en(inc)\n")
-  else ()
-
-
-
-(* ************************************************************************** *)
-(* Begin/End Proof *)
-
-let initialize_proof () =
-  GenSym.reset gs_callid;
-  GenSym.reset gs1;
-  GenSym.reset gs2;
-  GenSym.reset gs3;
-  GenSym.reset gs4;
-  GenSym.reset gs_constridx;
-  GenSym.reset gs_anon;
-  clear_tacst_ctx_ppM ();
-  clear_tacst_goalM ();
-  clear_constr_shareM ();
-  clear_tacst_low_constrM ();
-  clear_outputted_constrS ()
-
-let finalize_proof () =
-  ml4tp_write "Constrs\n";
-  dump_low_constrM ();
-  ml4tp_write "PrTyps\n";
-  dump_pretty_tacst_ctx_typM ();
-  ml4tp_write "PrBods\n";
-  dump_pretty_tacst_ctx_bodyM ();
-  ml4tp_write "PrGls\n";
-  dump_pretty_tacst_goalM ();
-  ml4tp_flush()
-
-let rec show_vernac_typ_exp vt ve =
-  match vt with
-  | VtStartProof (name, _, names) -> 
-      initialize_proof ();
-      ml4tp_write (Printf.sprintf "bg(pf) {!} %s {!} %s\n" name (show_ls show_id ", " names))
-  | VtSideff _ -> ()
-  | VtQed _ ->
-      finalize_proof ();
-      ml4tp_write ("en(pf)\n")
-  | VtProofStep _ ->
-    begin
-      match ve with
-      | VernacSubproof _ -> ml4tp_write "bg(spf)\n"
-      | VernacEndSubproof -> ml4tp_write "en(spf)\n"
-      | _ -> ()
-    end
-  | VtProofMode _ -> ()
-  | VtQuery (_, _) -> ()
-  | VtStm (_, _) -> ()
-  | VtUnknown -> ()
-
-
-
-(* ************************************************************************** *)
 (* Glob_constr printing *)
 
 (* Note(deh): 
@@ -677,6 +459,40 @@ let show_binding_kind bk =
   | Decl_kinds.Implicit -> "I"
 
 
+let show_predicate_pattern (n, m_args) =
+  let f (loc, (mutind, i), ns) = Printf.sprintf "(%s %d %s)" (Names.MutInd.to_string mutind) i (show_sexpr_ls show_name ns) in
+  Printf.sprintf "(%s %s)" (show_name n) (show_maybe f m_args)
+let show_tomatch_tuple show_gc (gc, pp) =
+  Printf.sprintf "(%s %s)" (show_gc gc) (show_predicate_pattern pp)
+let show_tomatch_tuples show_gc tmts =
+  show_sexpr_ls (show_tomatch_tuple show_gc) tmts
+
+
+let show_case_clause show_gc (loc, ids, cps, gc) = 
+  Printf.sprintf "(%s %s %s)" (show_sexpr_ls show_id ids) (show_sexpr_ls show_cases_pattern cps) (show_gc gc)
+let show_case_clauses show_gc ccs =
+  show_sexpr_ls (show_case_clause show_gc) ccs
+
+
+let show_fix_recursion_order show_gc fro =
+  match fro with
+  | GStructRec ->
+      "S"
+  | GWfRec gc ->
+      Printf.sprintf "(W %s)" (show_gc gc)
+  | GMeasureRec (gc, m_gc) ->
+      Printf.sprintf "(M %s %s)" (show_gc gc) (show_maybe show_gc m_gc)
+let show_fix_kind show_gc fk =
+  match fk with
+  | GFix (ifros, i) ->
+      let f (m_j, fro) = Printf.sprintf "(%s %s)" (show_maybe string_of_int m_j) (show_fix_recursion_order show_gc fro) in
+      Printf.sprintf "(F %s %d)" (show_sexpr_arr f ifros) i
+  | GCoFix i ->
+      Printf.sprintf "(C %d)" i
+let show_glob_decl show_gc (name, bk, m_c, c) =
+  Printf.sprintf "%s %s %s %s" (show_name name) (show_binding_kind bk) (show_maybe show_gc m_c) (show_gc c)
+
+
 let rec show_glob_constr gc =
   match gc with
   | GRef (l, gr, _) ->
@@ -684,7 +500,7 @@ let rec show_glob_constr gc =
   | GVar (l, id) ->
       Printf.sprintf "(V %s)" (show_id id)
   | GEvar (l, en, args) -> 
-      let f (id, gc) = Printf.sprintf "(%s, %s)" (show_id id) (show_glob_constr gc) in
+      let f (id, gc) = Printf.sprintf "(%s %s)" (show_id id) (show_glob_constr gc) in
       Printf.sprintf "(E %s %s)" (show_id en) (show_sexpr_ls f args)
   | GPatVar (l, (b, pv)) ->
       Printf.sprintf "(PV %b %s)" b (show_id pv)
@@ -697,14 +513,15 @@ let rec show_glob_constr gc =
   | GLetIn (l, n, gc1, gc2) ->
       Printf.sprintf "(LI %s %s %s)" (show_name n) (show_glob_constr gc1) (show_glob_constr gc2)
   | GCases (l, csty, m_gc, tups, ccs) ->
-      Printf.sprintf "(C %s %s %s %s)" (show_case_style csty) (show_maybe show_glob_constr m_gc) (show_tomatch_tuples tups) (show_case_clauses ccs)
+      Printf.sprintf "(C %s %s %s %s)" (show_case_style csty) (show_maybe show_glob_constr m_gc) (show_tomatch_tuples show_glob_constr tups) (show_case_clauses show_glob_constr ccs)
   | GLetTuple (l, ns, arg, gc1, gc2) ->
       let f (name, m_gc) = Printf.sprintf "(%s %s)" (show_name name) (show_maybe show_glob_constr m_gc) in
       Printf.sprintf "(LT %s %s %s %s)" (show_sexpr_ls show_name ns) (f arg) (show_glob_constr gc1) (show_glob_constr gc2)
   | GIf (l, gc, (n, m_gc), gc2, gc3) ->
-      Printf.sprintf "(I %s %s %s)" (show_glob_constr gc) (show_glob_constr gc2) (show_glob_constr gc3)
+      let s = Printf.sprintf "(%s %s)" (show_name n) (show_maybe show_glob_constr m_gc) in
+      Printf.sprintf "(I %s %s %s %s)" (show_glob_constr gc) s (show_glob_constr gc2) (show_glob_constr gc3)
   | GRec (l, fk, ids, gdss, gcs1, gcs2) ->
-      Printf.sprintf "(R %s %s %s %s %s)" (show_fix_kind fk) (show_sexpr_arr show_id ids) (show_sexpr_arr (show_sexpr_ls show_glob_decl) gdss) (show_glob_constr_arr gcs1) (show_glob_constr_arr gcs2)
+      Printf.sprintf "(R %s %s %s %s %s)" (show_fix_kind show_glob_constr fk) (show_sexpr_arr show_id ids) (show_sexpr_arr (show_sexpr_ls (show_glob_decl show_glob_constr)) gdss) (show_glob_constr_arr gcs1) (show_glob_constr_arr gcs2)
   | GSort (l, gsort) ->
       Printf.sprintf "(S %s)" (show_glob_sort gsort)
   | GHole (l, k, ipne, m_gga) ->
@@ -716,36 +533,372 @@ and show_glob_constrs gcs =
 and show_glob_constr_arr gcs =
   show_sexpr_arr show_glob_constr gcs
 
-and show_predicate_pattern (n, m_args) =
-  let f (loc, (mutind, i), ns) = Printf.sprintf "(%s %d %s)" (Names.MutInd.to_string mutind) i (show_sexpr_ls show_name ns) in
-  Printf.sprintf "(%s %s)" (show_name n) (show_maybe f m_args)
-and show_tomatch_tuple (gc, pp) =
-  Printf.sprintf "(%s %s)" (show_glob_constr gc) (show_predicate_pattern pp)
-and show_tomatch_tuples tmts =
-  show_sexpr_ls show_tomatch_tuple tmts
 
-and show_case_clause (loc, ids, cps, gc) = 
-  Printf.sprintf "(%s %s %s)" (show_sexpr_ls show_id ids) (show_sexpr_ls show_cases_pattern cps) (show_glob_constr gc)
-and show_case_clauses ccs =
-  show_sexpr_ls show_case_clause ccs
 
-and show_fix_recursion_order fro =
-  match fro with
-  | GStructRec ->
-      "S"
-  | GWfRec gc ->
-      Printf.sprintf "(W %s)" (show_glob_constr gc)
-  | GMeasureRec (gc, m_gc) ->
-      Printf.sprintf "(M %s %s)" (show_glob_constr gc) (show_maybe show_glob_constr m_gc)
-and show_fix_kind fk =
-  match fk with
-  | GFix (ifros, i) ->
-      let f (m_j, fro) = Printf.sprintf "(%s %s)" (show_maybe string_of_int m_j) (show_fix_recursion_order fro) in
-      Printf.sprintf "(F %s %d)" (show_sexpr_arr f ifros) i
-  | GCoFix i ->
-      Printf.sprintf "(C %d)" i
-and show_glob_decl (name, bk, m_c, c) =
-  Printf.sprintf "%s %s %s %s" (show_name name) (show_binding_kind bk) (show_maybe show_glob_constr m_c) (show_glob_constr c)
+(* ************************************************************************** *)
+(* Glob_constr equality/hashing *)
+
+let eq_maybe eq = function
+  | None, None -> true
+  | Some x, Some x' -> eq x x'
+  | _, _ -> false
+
+
+let eq_ls eq ls ls' = 
+  List.fold_left (fun acc (x, x') -> eq x x' && acc) true (List.combine ls ls')
+
+
+let eq_arr eq arr arr' =
+  Array.for_all (fun x -> x) (Array.map2 (fun x x' -> eq x x') arr arr')
+
+
+let eq_global_reference gr gr' =
+  match gr, gr' with
+  | VarRef v, VarRef v' ->
+      Id.equal v v'
+  | ConstRef c, ConstRef c' ->
+      eq_constant c c'
+  | IndRef c, IndRef c' ->
+      eq_ind c c'
+  | ConstructRef c, ConstructRef c' ->
+      eq_constructor c c'
+  | _, _ -> false
+
+
+let eq_case_style csty csty' =
+  match csty, csty' with
+  | LetStyle, LetStyle -> true
+  | IfStyle, IfStyle -> true
+  | LetPatternStyle, LetPatternStyle -> true
+  | MatchStyle, MatchStyle -> true
+  | RegularStyle, RegularStyle -> true
+  | _, _ -> false
+
+
+let rec eq_gc gc1 gc2 =
+  match gc1, gc2 with
+  | GRef (_, gr, _), GRef (_, gr', _) -> 
+      eq_global_reference gr gr'
+  | GVar (_, id), GVar (_, id') ->
+      Id.equal id id'
+  | GEvar (_, en, args), GEvar (_, en', args') ->
+      Id.equal en en' && eq_ls (fun (n, gc) (n', gc') -> Id.equal n n' && eq_gc gc gc') args args'
+  | GPatVar (_, (b, pv)), GPatVar (_, (b', pv')) ->
+      b == b' && Id.equal pv pv'
+  | GApp (_, gc, gcs), GApp (_, gc', gcs') ->
+      eq_gc gc gc' && eq_gc_ls gcs gcs'
+  | GLambda (_, n, bk, gc1, gc2), GLambda (_, n', bk', gc1', gc2') ->
+      eq_gc gc1 gc1' && eq_gc gc2 gc2'
+  | GProd (_, n, bk, gc1, gc2), GProd (_, n', bk', gc1', gc2') ->
+      eq_gc gc1 gc1' && eq_gc gc2 gc2'
+  | GLetIn (_, n, gc1, gc2), GLetIn (_, n', gc1', gc2') ->
+      eq_gc gc1 gc1' && eq_gc gc2 gc2'
+  | GCases (_, csty, m_gc, tups, ccs), GCases (_, csty', m_gc', tups', ccs') ->
+      eq_case_style csty csty' && eq_maybe eq_gc (m_gc, m_gc') && eq_tomatch_tuples tups tups' && eq_case_clauses ccs ccs'
+  | GLetTuple (_, ns, (n, m_gc), gc1, gc2), GLetTuple (_, ns', (n', m_gc'), gc1', gc2') ->
+      eq_maybe eq_gc (m_gc, m_gc') && eq_gc gc1 gc1' && eq_gc gc2 gc2'
+  | GIf (_, gc, (n, m_gc), gc2, gc3), GIf (_, gc', (n', m_gc'), gc2', gc3') ->
+      eq_gc gc gc' && eq_maybe eq_gc (m_gc, m_gc') && eq_gc gc2 gc2' && eq_gc gc3 gc3'
+  | GRec (_, fk, ids, gdss, gcs1, gcs2), GRec (_, fk', ids', gdss', gcs1', gcs2') ->
+     eq_fix_kind fk fk' && eq_arr Id.equal ids ids' && eq_arr (eq_ls eq_glob_decl) gdss gdss' && eq_gc_arr gcs1 gcs1' && eq_gc_arr gcs2 gcs2'
+  | GSort (_, gsort), GSort (_, gsort') ->
+      (* Being lazy ... convert to string and check *)
+      show_glob_constr gc1 == show_glob_constr gc2
+  | GHole (_, k, ipne, m_gga), GHole (_, k', ipne', m_gga') ->
+      (* Being lazy ... convert to string and check *)
+      show_glob_constr gc1 == show_glob_constr gc2
+  | GCast (_, gc, gc_ty), GCast (_, gc', gc_ty') ->
+      eq_gc gc gc' && eq_cast_type gc_ty gc_ty'
+  | _, _ -> false
+
+and eq_gc_ls gcs gcs' =
+  eq_ls eq_gc gcs gcs'
+and eq_gc_arr gcs gcs' =
+  Array.for_all (fun x -> x) (Array.map2 (fun gc gc' -> eq_gc gc gc') gcs gcs')
+
+and eq_cast_type ct ct' = 
+  match ct, ct' with
+  | CastConv a, CastConv a' -> eq_gc a a'
+  | CastVM a, CastVM a' -> eq_gc a a'
+  | CastCoerce, CastCoerce -> true
+  | CastNative a, CastNative a' -> eq_gc a a'
+  | _, _ -> false
+
+and eq_predicate_pattern (n, m_args) (n', m_args') =
+  Name.equal n n' && eq_maybe (fun (_, ind, ns) (_, ind', ns') -> eq_ind ind ind') (m_args, m_args')
+and eq_tomatch_tuple (gc, pp) (gc', pp') =
+  eq_gc gc gc' && eq_predicate_pattern pp pp'
+and eq_tomatch_tuples tmts tmts' =
+  eq_ls eq_tomatch_tuple tmts tmts'
+
+and eq_cases_pattern cp cp' =
+  match cp, cp' with
+  | PatVar (_, n), PatVar (_, n') ->
+      Name.equal n n'
+  | PatCstr (_, c, cps, n), PatCstr (_, c', cps', n') ->
+      eq_constructor c c' && eq_ls (fun cp cp' -> eq_cases_pattern cp cp') cps cps' && Name.equal n n'
+  | _, _ -> false
+and eq_case_clause (loc, ids, cps, gc) (loc', ids', cps', gc') =
+  eq_gc gc gc' && eq_ls eq_cases_pattern cps cps'
+and eq_case_clauses ccs ccs' =
+  eq_ls (fun cc cc' -> eq_case_clause cc cc') ccs ccs'
+
+and eq_fix_recursion_order fro fro' =
+  match fro, fro' with
+  | GStructRec, GStructRec ->
+      true
+  | GWfRec gc, GWfRec gc' ->
+      eq_gc gc gc'
+  | GMeasureRec (gc, m_gc), GMeasureRec (gc', m_gc') ->
+      eq_gc gc gc' && eq_maybe eq_gc (m_gc, m_gc')
+  | _, _ -> 
+      false
+and eq_fix_kind fk fk' =
+  match fk, fk' with
+  | GFix (ifros, i), GFix (ifros', i') ->
+      i == i' && eq_arr (fun (m_j, fro) (m_j', fro') -> eq_maybe (==) (m_j, m_j') && eq_fix_recursion_order fro fro') ifros ifros'
+  | GCoFix i, GCoFix i' ->
+      i == i'
+  | _, _ -> 
+      false
+and eq_glob_decl (name, bk, m_c, c) (name', bk', m_c', c') =
+  eq_maybe eq_gc (m_c, m_c') && eq_gc c c'
+
+
+open Hashset.Combine
+
+
+let hash_global_reference gr =
+  match gr with
+  | VarRef v ->
+      combinesmall 1 (Id.hash v)
+  | ConstRef v ->
+      combinesmall 2 (Constant.hash v)
+  | IndRef ind ->
+      combinesmall 3 (ind_hash ind)
+  | ConstructRef c ->
+      combinesmall 4 (constructor_hash c)
+
+
+let hash_glob_sort gsort =
+  match gsort with
+  | GProp ->
+      combinesmall 16 0
+  | GSet ->
+      combinesmall 16 1
+  | GType si ->
+      combinesmall 16 2
+
+
+let hash_intro_pattern_naming_expr ipne =
+  match ipne with
+  | IntroIdentifier id ->
+      combine 0 (Id.hash id)
+  | IntroFresh id ->
+      combine 1 (Id.hash id)
+  | IntroAnonymous ->
+      2
+
+
+let hash_evar_kinds = function
+  | Evar_kinds.ImplicitArg (gr, (i, m_id), b) ->
+      combinesmall 1 (hash_global_reference gr)
+  | Evar_kinds.BinderType name ->
+      2
+  | Evar_kinds.QuestionMark ods -> begin
+      match ods with
+      | Evar_kinds.Define b -> 3
+      | Evar_kinds.Expand -> 4
+      end
+  | Evar_kinds.CasesType b ->
+      5
+  | Evar_kinds.InternalHole ->
+      6
+  | Evar_kinds.TomatchTypeParameter (ind, j) ->
+      combinesmall 7 (ind_hash ind)
+  | Evar_kinds.GoalEvar ->
+      8
+  | Evar_kinds.ImpossibleCase ->
+      9
+  | Evar_kinds.MatchingVar (b, id) ->
+      combinesmall 10 (Id.hash id)
+  | Evar_kinds.VarInstance id ->
+      combinesmall 11 (Id.hash id)
+  | Evar_kinds.SubEvar ek ->
+      combinesmall 12 (Evar.hash ek)
+
+
+let rec hash_gc gc =
+  match gc with
+  | GRef (_, gr, _) ->
+      hash_global_reference gr
+  | GVar (_, id) ->
+      combinesmall 5 (Id.hash id)
+  | GEvar (_, en, args) ->
+      let f (n, gc) = combine (Id.hash n) (hash_gc gc) in
+      combinesmall 6 (List.fold_left (fun acc x -> combine (f x) acc) 0 args)
+  | GPatVar (_, (b, pv)) ->
+      combinesmall 7 (Id.hash pv)
+  | GApp (l, gc, gcs) ->
+      combinesmall 8 (combine (hash_gc_ls gcs) (hash_gc gc))
+  | GLambda (_, n, bk, gc1, gc2) ->
+      combinesmall 9 (combine (hash_gc gc1) (hash_gc gc2))
+  | GProd (_, n, bk, gc1, gc2) ->
+      combinesmall 10 (combine (hash_gc gc1) (hash_gc gc2))
+  | GLetIn (_, n, gc1, gc2) ->
+      combinesmall 11 (combine (hash_gc gc1) (hash_gc gc2))
+  | GCases (_, csty, m_gc, tups, ccs) ->
+      combinesmall 12 (hash_case_clauses ccs)
+  | GLetTuple (l, ns, arg, gc1, gc2) ->
+      combinesmall 13 (combine (hash_gc gc1) (hash_gc gc2))
+  | GIf (_, gc, (n, m_gc), gc2, gc3) ->
+      combinesmall 14 (combine3 (hash_gc gc) (hash_gc gc2) (hash_gc gc3))
+  | GRec (_, fk, ids, gdss, gcs1, gcs2) ->
+      combinesmall 15 (combine (hash_gc_arr gcs1) (hash_gc_arr gcs2))
+  | GSort (_, gsort) ->
+      combinesmall 16 (hash_glob_sort gsort)
+  | GHole (_, k, ipne, m_gga) ->
+      combinesmall 18 (combine (hash_evar_kinds k) (hash_intro_pattern_naming_expr ipne))
+  | GCast (_, gc, gc_ty) ->
+      let hc = hash_gc gc in
+      let ht = 
+        match gc_ty with
+        | CastConv a -> combine3 hc 0 (hash_gc a)
+        | CastVM a -> combine3 hc 1 (hash_gc a)
+        | CastCoerce -> combine hc 2
+        | CastNative a -> combine3 hc 3 (hash_gc a)
+      in
+        combinesmall 19 ht
+
+and hash_gc_ls gcs =
+  List.fold_left (fun acc gc -> combine (hash_gc gc) acc) 0 gcs
+and hash_gc_arr gcs =
+  Array.fold_left (fun acc gc -> combine (hash_gc gc) acc) 0 gcs
+
+and hash_cases_pattern cp =
+  match cp with
+  | PatVar (_, n) ->
+      1
+  | PatCstr (_, (ind, j), cps, n) ->
+      let hcps = List.fold_left (fun acc cp -> combine (hash_cases_pattern cp) acc) 0 cps in
+      combinesmall 2 (combine (ind_hash ind) hcps)
+and hash_case_clause (loc, ids, cps, gc) = 
+  combine (hash_gc gc) (hash_cases_pattern cps)
+and hash_case_clauses ccs =
+  List.fold_left (fun acc cc -> combine (hash_case_clauses ccs) acc) 0 ccs
+
+
+
+(* ************************************************************************** *)
+(* Create shared glob_constr *)
+
+let gs_gc_idx = GenSym.init ()
+let fresh_gc_idx () = GenSym.fresh gs_gc_idx
+
+module GlobConstrHash =
+  struct
+    type t = glob_constr
+    let equal c1 c2 = eq_gc c1 c2   (* Note(deh): problem potentially ... *)
+    let hash c = hash_gc c
+  end
+module GlobConstrHashtbl = Hashtbl.Make(GlobConstrHash)
+
+
+(* Map an expression to an index *)
+let gc_shareM = GlobConstrHashtbl.create 2000
+let clear_gc_shareM () = GlobConstrHashtbl.clear gc_shareM
+
+
+(* Map an index to its low-level expression *)
+let tacst_low_gcM = ref (IntMap.empty)
+let clear_tacst_low_gcM () = tacst_low_gcM := IntMap.empty
+let dump_low_gcM () = 
+  IntMap.iter (fun k v -> ml4tp_write (Printf.sprintf "%d: %s\n" k v)) !tacst_low_gcM
+
+
+let with_gc_idx gc value =
+  let idx = fresh_gc_idx () in
+  GlobConstrHashtbl.add (gc_shareM) gc idx;
+  tacst_low_gcM := IntMap.add idx value !tacst_low_gcM;
+  idx
+
+
+(* Print out sexprs but with indicies for terms *)
+let rec share_glob_constr gc =
+  match GlobConstrHashtbl.find_opt (gc_shareM) gc with
+  | Some idx -> idx
+  | None -> 
+      match gc with
+      | GRef (_, gr, _) ->
+          with_gc_idx gc (Printf.sprintf "(! %s)" (show_global_reference gr))
+      | GVar (_, id) ->
+          with_gc_idx gc (Printf.sprintf "(V %s)" (show_id id))
+      | GEvar (_, en, args) ->
+          let f (id, gc) = Printf.sprintf "(%s %d)" (show_id id) (share_glob_constr gc) in
+          with_gc_idx gc (Printf.sprintf "(E %s %s)" (show_id en) (show_sexpr_ls f args))
+      | GPatVar (_, (b, pv)) ->
+          with_gc_idx gc (Printf.sprintf "(PV %b %s)" b (show_id pv))
+      | GApp (_, gc, gcs) ->
+          let idx = share_glob_constr gc in
+          let idxs = share_glob_constrs gcs in
+          with_gc_idx gc (Printf.sprintf "A %d %s" idx idxs)
+      | GLambda (_, n, bk, gc1, gc2) ->
+          let sn = show_name n in
+          let sbk = (show_binding_kind bk) in
+          let idx1 = share_glob_constr gc1 in
+          let idx2 = share_glob_constr gc2 in
+          with_gc_idx gc (Printf.sprintf "(L %s %s %d %d)" sn sbk idx1 idx2)
+      | GProd (_, n, bk, gc1, gc2) ->
+          let sn = show_name n in
+          let sbk = (show_binding_kind bk) in
+          let idx1 = share_glob_constr gc1 in
+          let idx2 = share_glob_constr gc2 in
+          with_gc_idx gc (Printf.sprintf "(P %s %s %d %d)" sn sbk idx1 idx2)
+      | GLetIn (_, n, gc1, gc2) ->
+          let sn = show_name n in
+          let idx1 = share_glob_constr gc1 in
+          let idx2 = share_glob_constr gc2 in
+          with_gc_idx gc (Printf.sprintf "(LI %s %d %d)" sn idx1 idx2)
+      | GCases (_, csty, m_gc, tups, ccs) ->
+          let scsty = show_case_style csty in
+          let sm_gc = show_maybe share_glob_constr' m_gc in
+          let stups = show_tomatch_tuples share_glob_constr' tups in
+          let sccs = show_case_clauses share_glob_constr' ccs in
+          with_gc_idx gc (Printf.sprintf "(C %s %s %s %s)" scsty sm_gc stups sccs)
+      | GLetTuple (_, ns, arg, gc1, gc2) ->          
+          let names = show_sexpr_ls show_name ns in
+          let f (name, m_gc) = Printf.sprintf "(%s %s)" (show_name name) (show_maybe share_glob_constr' m_gc) in
+          let idx1 = share_glob_constr gc1 in
+          let idx2 = share_glob_constr gc2 in
+          with_gc_idx gc (Printf.sprintf "(LT %s %s %d %d)" names (f arg) idx1 idx2)      
+      | GIf (_, gc, (n, m_gc), gc2, gc3) ->
+          let idx = share_glob_constr gc in
+          let o = Printf.sprintf "(%s %s)" (show_name n) (show_maybe share_glob_constr' m_gc) in
+          let idx2 = share_glob_constr gc2 in
+          let idx3 = share_glob_constr gc3 in
+          with_gc_idx gc (Printf.sprintf "I %d %s %d %d" idx o idx2 idx3)
+      | GRec (_, fk, ids, gdss, gcs1, gcs2) ->
+          let sfk = show_fix_kind share_glob_constr' fk in
+          let sids = show_sexpr_arr show_id ids in
+          let sgdss = show_sexpr_arr (show_sexpr_ls (show_glob_decl share_glob_constr')) gdss in
+          let idxs1 = share_glob_constr_arr gcs1 in
+          let idxs2 = share_glob_constr_arr gcs2 in
+          with_gc_idx gc (Printf.sprintf "(R %s %s %s %s %s)" sfk sids sgdss idxs1 idxs2)
+      | GSort (_, gsort) ->
+          with_gc_idx gc (Printf.sprintf "(S %s)" (show_glob_sort gsort))
+      | GHole (_, k, ipne, m_gga) ->
+          with_gc_idx gc (Printf.sprintf "(H %s %s %s)" (show_evar_kinds k) (show_intro_pattern_naming_expr ipne) (show_maybe show_generic_arg m_gga))
+      | GCast (_, gc, gc_ty) ->
+          let idx = share_glob_constr gc in
+          let sgc_ty = show_cast_type share_glob_constr' gc_ty in
+          with_gc_idx gc (Printf.sprintf "(T %d %s)" idx sgc_ty)
+and share_glob_constr' gc =
+  string_of_int (share_glob_constr gc)
+and share_glob_constrs gcs = 
+  show_sexpr_ls (fun gc -> string_of_int (share_glob_constr gc)) gcs
+and share_glob_constr_arr gcs = 
+  show_sexpr_arr (fun gc -> string_of_int (share_glob_constr gc)) gcs
+
 
 
 (* ************************************************************************** *)
@@ -1099,6 +1252,293 @@ and show_tacs tacs =
   show_sexpr_ls show_tac tacs
 and show_tac_arr tacs = 
   show_sexpr_arr show_tac tacs
+
+
+
+(* ************************************************************************** *)
+(* Context printing *)
+
+(* NOTE(deh): 
+ * 
+ * 1. Tactic state is list of pairs of identifiers and expression integers (from sharing)
+ *    x1 5, x2 10, x3 2, ... {!} 4
+ *
+ * 2. Pretty-print information
+ *    tacst_ctx_ppM: int -> pp_str        (map shared id to pretty-print string)
+ *
+ * 3. glob_constr information
+ *    tacst_ctx_gcM: int -> glob_constr   (map shared it to glob_constr)
+ *)
+
+let tacst_ctx_ppM : (int * string * string option) IntMap.t ref = ref IntMap.empty
+let clear_tacst_ctx_ppM () = tacst_ctx_ppM := IntMap.empty
+let add_tacst_ctx_ppM key value = tacst_ctx_ppM := IntMap.add key value !tacst_ctx_ppM
+let dump_pretty_tacst_ctx_typM () =
+  let f k v =
+    match v with
+    | (_, pp_typ, _) -> ml4tp_write (Printf.sprintf "%d: %s\n" k pp_typ)
+  in
+  IntMap.iter f !tacst_ctx_ppM
+let dump_pretty_tacst_ctx_bodyM () =
+  let f k v =
+    match v with
+    | (_, _, Some pp_body) -> ml4tp_write (Printf.sprintf "%d: %s\n" k pp_body)
+    | (_, _, None) -> ()
+  in
+  IntMap.iter f !tacst_ctx_ppM
+
+(* NOTE(deh): switch for hashtable *)
+(*
+let tacst_ctx_ppM = IntTbl.create 500
+let clear_tacst_ctx_ppM () = IntTbl.clear tacst_ctx_ppM
+let add_tacst_ctx_ppM key value = IntTbl.add tacst_ctx_ppM key value
+let dump_pretty_tacst_ctx_typM () =
+  let f k v =
+    match v with
+    | (pp_typ, _) -> ml4tp_write (Printf.sprintf "%d: %s\n" k pp_typ)
+  in
+  IntTbl.iter f tacst_ctx_ppM
+let dump_pretty_tacst_ctx_bodyM () =
+  let f k v =
+    match v with
+    | (_, Some pp_body) -> ml4tp_write (Printf.sprintf "%d: %s\n" k pp_body)
+    | (_, None) -> ()
+  in
+  IntTbl.iter f tacst_ctx_ppM
+*)
+
+let detype env sigma constr = 
+  let avoid = Termops.ids_of_context env in
+  Detyping.detype ~lax:false true avoid env sigma constr
+
+(*
+let show_ctx_ldecl env sigma (typ, pr_typ, body) id =
+  match body with
+  | Some (body, pp_body) ->
+      let typ_id = share_constr typ in 
+      let body_id = share_constr body in
+      let typ_gc = show_glob_constr (detype env sigma typ) in
+      add_tacst_ctx_ppM typ_id (typ_gc, pr_typ, Some pp_body);
+      Printf.sprintf "%s %d %d" (show_id id) typ_id body_id
+  | None ->
+      let typ_id = share_constr typ in
+      let typ_gc = show_glob_constr (detype env sigma typ) in
+      add_tacst_ctx_ppM typ_id (typ_gc, pr_typ, None);
+      Printf.sprintf "%s %d" (show_id id) typ_id
+*)
+
+(* NOTE(deh): experimental *)
+let show_ctx_ldecl' env sigma (typ, body) id =
+  let typ_id = share_constr typ in
+  if IntMap.mem typ_id !tacst_ctx_ppM
+  then Printf.sprintf "%s %d" (show_id id) typ_id
+  else
+    let typ_gc = share_glob_constr (detype env sigma typ) in
+    let pr_typ = pp2str (pr_ltype_env env sigma typ) in
+    add_tacst_ctx_ppM typ_id (typ_gc, pr_typ, None);
+    Printf.sprintf "%s %d" (show_id id) typ_id
+      
+let show_var_list_decl env sigma (l, c, typ) =
+  let pbody = match c with
+    | None -> None
+    | Some c ->
+        let pb = pr_lconstr_env env sigma c in
+        let pb = if isCast c then surround pb else pb in
+        Some (c, pp2str pb)
+  in
+  (* List.map (show_ctx_ldecl env sigma (typ, pp2str (pr_ltype_env env sigma typ), pbody)) l *)
+  List.map (show_ctx_ldecl' env sigma (typ, pbody)) l
+
+let show_rel_decl env sigma decl =
+  let open Context.Rel.Declaration in
+  let na = get_name decl in
+  let typ = get_type decl in
+  let id = 
+    match na with
+    | Anonymous -> Names.Id.of_string (show_name na)
+    | Name id -> id
+  in
+  let body = 
+    match decl with
+    | LocalAssum _ -> None
+    | LocalDef (_, c, _) ->
+        let pb = pr_lconstr_env env sigma c in
+        let pb = if isCast c then surround pb else pb in
+        Some (c, pp2str pb)
+  in
+  (* show_ctx_ldecl env sigma (typ, pp2str (pr_ltype_env env sigma typ), body) id *)
+  show_ctx_ldecl' env sigma (typ, body) id
+
+let show_context env sigma =
+  let named_ids =
+    Context.NamedList.fold
+      (fun decl ids -> let ids' = show_var_list_decl env sigma decl in ids' @ ids)
+      (Termops.compact_named_context (Environ.named_context env)) ~init:[]
+  in
+  let rel_ids = 
+    Environ.fold_rel_context
+      (fun env decl acc -> let r = show_rel_decl env sigma decl in r::acc)
+      env ~init:[]
+  in
+  show_ls (fun x -> x) ", " (named_ids @ rel_ids)
+
+
+
+(* ************************************************************************** *)
+(* Goals printing *)
+
+let tacst_goalM = ref IntMap.empty
+let clear_tacst_goalM () = tacst_goalM := IntMap.empty
+let add_goal cid env sigma concl =
+  tacst_goalM := IntMap.add cid (pp2str (pr_goal_concl_style_env env sigma concl)) !tacst_goalM
+let add_goal' env sigma concl = 
+  let concl_id = share_constr concl in
+  if IntMap.mem concl_id !tacst_goalM 
+  then concl_id
+  else
+    let gc_concl = share_glob_constr (detype env sigma concl) in
+    let pr_concl = pp2str (pr_goal_concl_style_env env sigma concl) in
+    add_tacst_ctx_ppM concl_id (gc_concl, pr_concl, None);
+    tacst_goalM := IntMap.add concl_id pr_concl !tacst_goalM;
+    concl_id
+
+(* NOTE(deh): No print because it's in shareM *)
+let dump_pretty_tacst_goalM () = 
+  IntMap.iter (fun k v -> ml4tp_write (Printf.sprintf "%d: %s\n" k v)) !tacst_goalM
+
+(* NOTE(deh): switch for hashtable *)
+(*
+let tacst_goalM = IntTbl.create 500
+let clear_tacst_goalM () = IntTbl.clear tacst_goalM
+let add_goal cid env sigma concl =
+  IntTbl.add tacst_goalM cid (pp2str (pr_goal_concl_style_env env sigma concl))
+let dump_pretty_tacst_goalM () = 
+  IntTbl.iter (fun k v -> ml4tp_write (Printf.sprintf "%d: %s\n" k v)) tacst_goalM
+*)
+
+
+
+(* ************************************************************************** *)
+(* Incremental printing *)
+
+(* NOTE(deh): 
+ * 
+ * For interactive proof-building, we need to output the shared representation
+ * table after each proof step, not just at the end. Of course, we only output
+ * the new entries.
+ *)
+
+
+(* Set to true if you want to have incremental output *)
+let f_incout = ref true
+let set_incout b = f_incout := b
+
+(* Keep track of outputted shared ASTs *)
+module IntSet = Set.Make(struct type t = int let compare = compare end)
+let outputted_constrS = ref (IntSet.empty)
+let clear_outputted_constrS () = outputted_constrS := IntSet.empty
+let dump_outputted_constrS () =
+  IntSet.iter (fun k -> ml4tp_write (Printf.sprintf "%d " k)) !outputted_constrS
+
+let outputted_gcS = ref IntSet.empty
+let clear_outputted_gcS () = outputted_gcS := IntSet.empty
+
+let dump_low_incr_constrM () =
+  let f constr_idx constr_val =
+    if IntSet.mem constr_idx !outputted_constrS
+    then ()
+    else begin
+      (* Output constr table *)
+      outputted_constrS := IntSet.add constr_idx !outputted_constrS;
+      ml4tp_write (Printf.sprintf "%d: %s\n" constr_idx constr_val)
+      (*
+      ml4tp_write (Printf.sprintf "Looking for %d in\n" constr_idx);
+      IntMap.iter (fun k v -> ml4tp_write (Printf.sprintf "%d " k)) !tacst_ctx_ppM;
+      ml4tp_write "\n";
+      let (gc_val, _, _) = IntMap.find constr_idx !tacst_ctx_ppM in
+      ml4tp_write (Printf.sprintf "%d: %s\n" constr_idx gc_val)
+      *)
+    end
+  in
+  (*
+  let g gc_idx (gc_val, _, _) =
+    if IntSet.mem gc_idx !outputted_constrS
+    then ()
+    else ml4tp_write (Printf.sprintf "%d: %d\n" gc_idx gc_val)
+  in
+  *)
+  let h gc_idx gc_val =
+    if IntSet.mem gc_idx !outputted_gcS
+    then ()
+    else
+      outputted_gcS := IntSet.add gc_idx !outputted_gcS;
+      ml4tp_write (Printf.sprintf "%d: %s\n" gc_idx gc_val)
+  in
+  if !f_incout
+  then
+    (ml4tp_write "bg(inc)\n";
+     (* IntMap.iter g !tacst_ctx_ppM; *)
+     IntMap.iter h !tacst_low_constrM;
+     ml4tp_write "Constrs\n";
+     IntMap.iter f !tacst_low_constrM;
+     (* NOTE(deh): switch for hashtable *)
+     (* IntTbl.iter f tacst_low_constrM; *)
+     ml4tp_write "en(inc)\n")
+  else ()
+
+
+
+(* ************************************************************************** *)
+(* Begin/End Proof *)
+
+let initialize_proof () =
+  GenSym.reset gs_callid;
+  GenSym.reset gs1;
+  GenSym.reset gs2;
+  GenSym.reset gs3;
+  GenSym.reset gs4;
+  GenSym.reset gs_constridx;
+  GenSym.reset gs_anon;
+  clear_tacst_ctx_ppM ();
+  clear_tacst_goalM ();
+  clear_constr_shareM ();
+  clear_tacst_low_constrM ();
+  clear_gc_shareM ();
+  clear_tacst_low_gcM ();
+  clear_outputted_constrS ();
+  clear_outputted_gcS ()
+
+let finalize_proof () =
+  ml4tp_write "Constrs\n";
+  dump_low_constrM ();
+  ml4tp_write "PrTyps\n";
+  dump_pretty_tacst_ctx_typM ();
+  ml4tp_write "PrBods\n";
+  dump_pretty_tacst_ctx_bodyM ();
+  ml4tp_write "PrGls\n";
+  dump_pretty_tacst_goalM ();
+  ml4tp_flush()
+
+let rec show_vernac_typ_exp vt ve =
+  match vt with
+  | VtStartProof (name, _, names) -> 
+      initialize_proof ();
+      ml4tp_write (Printf.sprintf "bg(pf) {!} %s {!} %s\n" name (show_ls show_id ", " names))
+  | VtSideff _ -> ()
+  | VtQed _ ->
+      finalize_proof ();
+      ml4tp_write ("en(pf)\n")
+  | VtProofStep _ ->
+    begin
+      match ve with
+      | VernacSubproof _ -> ml4tp_write "bg(spf)\n"
+      | VernacEndSubproof -> ml4tp_write "en(spf)\n"
+      | _ -> ()
+    end
+  | VtProofMode _ -> ()
+  | VtQuery (_, _) -> ()
+  | VtStm (_, _) -> ()
+  | VtUnknown -> ()
 
 
 

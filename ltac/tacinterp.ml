@@ -668,9 +668,13 @@ let ml4tp_print_tactic kludge mode (call : Loc.t * ltac_call_kind) extra uid =
       let concl = Tacmach.New.pf_nf_concl gl in
       (* NOTE(deh): conclusion before ctx to get more sharing? *)
         
+      (*
       let concl_id = Pml4tp.share_constr concl in
-      let ctx = Pml4tp.show_context env sigma in
+      let gc_concl_id = 0 in
       let _ = Pml4tp.add_goal concl_id env sigma concl in
+      *)
+      let ctx = Pml4tp.show_context env sigma in
+      let concl_id = Pml4tp.add_goal' env sigma concl in
       let tacst = Printf.sprintf "%s {!} %d" ctx concl_id in
         
       let gid = Evar.repr (Proofview.Goal.goal (Proofview.Goal.assume gl)) in
