@@ -647,77 +647,77 @@ let ml4tp_show_ltac_call_kind lck =
       Printf.sprintf "Constr(%s)" (Pml4tp.show_glob_constr c)
 
 let ml4tp_print_tactic kludge mode (call : Loc.t * ltac_call_kind) extra uid =
-  match snd call with
-  (* | LtacVarCall (_, tac') -> Proofview.tclUNIT () *)
-  (* | LtacConstrInterp _ -> Proofview.tclUNIT () *)
-  | _ ->
-    let name = Profile_ltac.string_of_call (snd call) in
-    let loc = fst call in
-    let sloc = Printf.sprintf "(%s,%d,%d)" (loc.Loc.fname) (loc.Loc.bp) (loc.Loc.ep) in
-    let lck = ml4tp_show_ltac_call_kind (snd call) in
-    Proofview.numgoals >>= fun numgoals ->
-    if numgoals == 0 
-    then (
-      Pml4tp.ml4tp_write (Printf.sprintf "bg(ts) {!} %d {!} %s {!} %s {!} %s {!} %s\n" uid mode name lck sloc);
-      Pml4tp.ml4tp_write ("ngs=0\n");
-      Pml4tp.ml4tp_write "en(ts)\n";
-      Pml4tp.dump_low_incr_constrM();
-      Pml4tp.ml4tp_flush();
-      Proofview.tclUNIT ()
-    )
-    else (
-      Proofview.Goal.enter { enter = begin fun gl ->
-        let env = Proofview.Goal.env gl in
-        let sigma = project gl in
-        let concl = Tacmach.New.pf_nf_concl gl in
-        (* NOTE(deh): conclusion before ctx to get more sharing? *)
+  let name = Profile_ltac.string_of_call (snd call) in
+  let loc = fst call in
+  let sloc = Printf.sprintf "(%s,%d,%d)" (loc.Loc.fname) (loc.Loc.bp) (loc.Loc.ep) in
+  let lck = ml4tp_show_ltac_call_kind (snd call) in
+  Proofview.numgoals >>= fun numgoals ->
+  if numgoals == 0 
+  then (
+    Pml4tp.ml4tp_write (Printf.sprintf "bg(ts) {!} %d {!} %s {!} %s {!} %s {!} %s\n" uid mode name lck sloc);
+    Pml4tp.ml4tp_write ("ngs=0\n");
+    Pml4tp.ml4tp_write "en(ts)\n";
+    Pml4tp.dump_low_incr_constrM();
+    Pml4tp.ml4tp_flush();
+    Proofview.tclUNIT ()
+  )
+  else (
+    Proofview.Goal.enter { enter = begin fun gl ->
+      let env = Proofview.Goal.env gl in
+      let sigma = project gl in
+      let concl = Tacmach.New.pf_nf_concl gl in
+      (* NOTE(deh): conclusion before ctx to get more sharing? *)
         
-        let concl_id = Pml4tp.share_constr concl in
-        let ctx = Pml4tp.show_context env sigma in
-        let _ = Pml4tp.add_goal concl_id env sigma concl in
-        let tacst = Printf.sprintf "%s {!} %d" ctx concl_id in
+      (*
+      let concl_id = Pml4tp.share_constr concl in
+      let gc_concl_id = 0 in
+      let _ = Pml4tp.add_goal concl_id env sigma concl in
+      *)
+      let ctx = Pml4tp.show_context env sigma in
+      let concl_id = Pml4tp.add_goal' env sigma concl in
+      let tacst = Printf.sprintf "%s {!} %d" ctx concl_id in
         
-        let gid = Evar.repr (Proofview.Goal.goal (Proofview.Goal.assume gl)) in
-        let full_tac =
-          match extra with
-          | None -> ""
-          | Some tac -> Pp.string_of_ppcmds (Pptactic.pr_glob_tactic env tac)
+      let gid = Evar.repr (Proofview.Goal.goal (Proofview.Goal.assume gl)) in
+      let full_tac =
+        match extra with
+        | None -> ""
+        | Some tac -> Pp.string_of_ppcmds (Pptactic.pr_glob_tactic env tac)
+      in
+      let ast_tac =
+        let show_ast_tac tac' =
+          Pml4tp.set_kludge_env env;
+          Pml4tp.show_tac tac'
         in
-        let ast_tac =
-          let show_ast_tac tac' =
-            Pml4tp.set_kludge_env env;
-            Pml4tp.show_tac tac'
-          in
-          match (snd call, extra, kludge) with
-          | (LtacAtomCall _, Some tac, Some _) -> show_ast_tac tac
-          | (LtacNotationCall _, Some tac, Some _) -> show_ast_tac tac
-          | (LtacNameCall r, _, _) -> show_ast_tac (Tacenv.interp_ltac r)
-          (* | (LtacVarCall (_, tac'), _, _) -> Printf.sprintf "VAR(%s)" (Pp.string_of_ppcmds (Pptactic.pr_glob_tactic env tac')) *)
-          (* | (LtacConstrInterp (c, _), _, _) -> Printf.sprintf "CONSTR(%s)" (Pml4tp.show_glob_constr c) *)
-          | _ -> "" 
-        in
-        (*
-        let concl_glob =
-          let avoid =ids_of_context env in
-          Detyping.detype ~lax:false true avoid env sigma concl
-        in
-        *)
-        (* NOTE(deh): printing out ASTs for something that looks like the below
-        let goal = pr_context_of env sigma ++ fnl () ++
-                   str "============================" ++ fnl () ++
-                   (pr_goal_concl_style_env env sigma concl)
-        in
-        *)
-          Pml4tp.ml4tp_write (Printf.sprintf "bg(ts) {!} %d {!} %s {!} %s {!} %s {!} %s\n" uid mode name lck sloc) ;
-          Pml4tp.ml4tp_write (Printf.sprintf "%d {!} %s {!} %s {!} %d\n" numgoals full_tac ast_tac gid);
-          Pml4tp.ml4tp_write tacst;
-          (* Pml4tp.ml4tp_write (Printf.sprintf "HERE %s" (Pml4tp.show_glob_constr concl_glob)); *)
-          Pml4tp.ml4tp_write "\n";
-          Pml4tp.ml4tp_write "en(ts)\n";
-          Pml4tp.dump_low_incr_constrM();
-          Pml4tp.ml4tp_flush();
-          Proofview.tclUNIT ()
-      end })
+        match (snd call, extra, kludge) with
+        | (LtacAtomCall _, Some tac, Some _) -> show_ast_tac tac
+        | (LtacNotationCall _, Some tac, Some _) -> show_ast_tac tac
+        | (LtacNameCall r, _, _) -> show_ast_tac (Tacenv.interp_ltac r)
+        (* | (LtacVarCall (_, tac'), _, _) -> Printf.sprintf "VAR(%s)" (Pp.string_of_ppcmds (Pptactic.pr_glob_tactic env tac')) *)
+        (* | (LtacConstrInterp (c, _), _, _) -> Printf.sprintf "CONSTR(%s)" (Pml4tp.show_glob_constr c) *)
+        | _ -> "" 
+      in
+      (*
+      let concl_glob =
+        let avoid =ids_of_context env in
+        Detyping.detype ~lax:false true avoid env sigma concl
+      in
+      *)
+      (* NOTE(deh): printing out ASTs for something that looks like the below
+      let goal = pr_context_of env sigma ++ fnl () ++
+                 str "============================" ++ fnl () ++
+                 (pr_goal_concl_style_env env sigma concl)
+      in
+      *)
+        Pml4tp.ml4tp_write (Printf.sprintf "bg(ts) {!} %d {!} %s {!} %s {!} %s {!} %s\n" uid mode name lck sloc) ;
+        Pml4tp.ml4tp_write (Printf.sprintf "%d {!} %s {!} %s {!} %d\n" numgoals full_tac ast_tac gid);
+        Pml4tp.ml4tp_write tacst;
+        (* Pml4tp.ml4tp_write (Printf.sprintf "HERE %s" (Pml4tp.show_glob_constr concl_glob)); *)
+        Pml4tp.ml4tp_write "\n";
+        Pml4tp.ml4tp_write "en(ts)\n";
+        Pml4tp.dump_low_incr_constrM();
+        Pml4tp.ml4tp_flush();
+        Proofview.tclUNIT ()
+    end })
 
 let ml4tp_wrap_tac' ist tac call extra call_id =
   let tac' ev =

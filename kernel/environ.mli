@@ -30,7 +30,6 @@ open Univ
 
 
 type env
-val deh_print_env : int -> env -> unit
 val pre_env : env -> Pre_env.env
 val env_of_pre_env : Pre_env.env -> env
 val oracle : env -> Conv_oracle.oracle
