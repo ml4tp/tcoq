@@ -33,6 +33,8 @@ open CErrors
  *)
 
 
+module IntSet = Set.Make(struct type t = int let compare = compare end)
+
 
 (* ************************************************************************** *)
 (* Output *)
@@ -171,12 +173,18 @@ let dump_low_constrM () =
   IntTbl.iter (fun k v -> ml4tp_write (Printf.sprintf "%d: %s\n" k v)) tacst_low_constrM
 *)
 
+(* Keep track of new-bindings added *)
+let new_low_constrs = ref []
+let clear_new_low_constrs () = new_low_constrs := []
+let add_new_low_constrs v = new_low_constrs := v :: !new_low_constrs
+
 let with_constr_idx constr value =
   let idx = fresh_constridx () in
   ConstrHashtbl.add (constr_shareM) constr idx;
   tacst_low_constrM := IntMap.add idx value !tacst_low_constrM;
   (* NOTE(deh): switch for hashtable *)
   (* IntTbl.add tacst_low_constrM idx value; *)
+  add_new_low_constrs (idx, value);
   idx
 
 let rec share_constr constr =
@@ -544,12 +552,16 @@ let eq_maybe eq = function
   | _, _ -> false
 
 
-let eq_ls eq ls ls' = 
-  List.fold_left (fun acc (x, x') -> eq x x' && acc) true (List.combine ls ls')
+let eq_ls eq ls ls' =
+  if List.length ls = List.length ls'
+  then List.fold_left (fun acc (x, x') -> eq x x' && acc) true (List.combine ls ls')
+  else false
 
 
 let eq_arr eq arr arr' =
-  Array.for_all (fun x -> x) (Array.map2 (fun x x' -> eq x x') arr arr')
+  if Array.length arr = Array.length arr'
+  then Array.for_all (fun x -> x) (Array.map2 (fun x x' -> eq x x') arr arr')
+  else false
 
 
 let eq_global_reference gr gr' =
@@ -584,7 +596,7 @@ let rec eq_gc gc1 gc2 =
   | GEvar (_, en, args), GEvar (_, en', args') ->
       Id.equal en en' && eq_ls (fun (n, gc) (n', gc') -> Id.equal n n' && eq_gc gc gc') args args'
   | GPatVar (_, (b, pv)), GPatVar (_, (b', pv')) ->
-      b == b' && Id.equal pv pv'
+      b = b' && Id.equal pv pv'
   | GApp (_, gc, gcs), GApp (_, gc', gcs') ->
       eq_gc gc gc' && eq_gc_ls gcs gcs'
   | GLambda (_, n, bk, gc1, gc2), GLambda (_, n', bk', gc1', gc2') ->
@@ -603,10 +615,10 @@ let rec eq_gc gc1 gc2 =
      eq_fix_kind fk fk' && eq_arr Id.equal ids ids' && eq_arr (eq_ls eq_glob_decl) gdss gdss' && eq_gc_arr gcs1 gcs1' && eq_gc_arr gcs2 gcs2'
   | GSort (_, gsort), GSort (_, gsort') ->
       (* Being lazy ... convert to string and check *)
-      show_glob_constr gc1 == show_glob_constr gc2
+      String.equal (show_glob_constr gc1) (show_glob_constr gc2)
   | GHole (_, k, ipne, m_gga), GHole (_, k', ipne', m_gga') ->
       (* Being lazy ... convert to string and check *)
-      show_glob_constr gc1 == show_glob_constr gc2
+      String.equal (show_glob_constr gc1) (show_glob_constr gc2)
   | GCast (_, gc, gc_ty), GCast (_, gc', gc_ty') ->
       eq_gc gc gc' && eq_cast_type gc_ty gc_ty'
   | _, _ -> false
@@ -614,7 +626,8 @@ let rec eq_gc gc1 gc2 =
 and eq_gc_ls gcs gcs' =
   eq_ls eq_gc gcs gcs'
 and eq_gc_arr gcs gcs' =
-  Array.for_all (fun x -> x) (Array.map2 (fun gc gc' -> eq_gc gc gc') gcs gcs')
+  eq_arr eq_gc gcs gcs'
+  (* Array.for_all (fun x -> x) (Array.map2 (fun gc gc' -> eq_gc gc gc') gcs gcs') *)
 
 and eq_cast_type ct ct' = 
   match ct, ct' with
@@ -656,9 +669,9 @@ and eq_fix_recursion_order fro fro' =
 and eq_fix_kind fk fk' =
   match fk, fk' with
   | GFix (ifros, i), GFix (ifros', i') ->
-      i == i' && eq_arr (fun (m_j, fro) (m_j', fro') -> eq_maybe (==) (m_j, m_j') && eq_fix_recursion_order fro fro') ifros ifros'
+      i = i' && eq_arr (fun (m_j, fro) (m_j', fro') -> eq_maybe (=) (m_j, m_j') && eq_fix_recursion_order fro fro') ifros ifros'
   | GCoFix i, GCoFix i' ->
-      i == i'
+      i = i'
   | _, _ -> 
       false
 and eq_glob_decl (name, bk, m_c, c) (name', bk', m_c', c') =
@@ -728,8 +741,7 @@ let hash_evar_kinds = function
       combinesmall 12 (Evar.hash ek)
 
 
-let rec hash_gc gc =
-  match gc with
+let rec hash_gc = function
   | GRef (_, gr, _) ->
       hash_global_reference gr
   | GVar (_, id) ->
@@ -783,9 +795,9 @@ and hash_cases_pattern cp =
       let hcps = List.fold_left (fun acc cp -> combine (hash_cases_pattern cp) acc) 0 cps in
       combinesmall 2 (combine (ind_hash ind) hcps)
 and hash_case_clause (loc, ids, cps, gc) = 
-  combine (hash_gc gc) (hash_cases_pattern cps)
+  combine (hash_gc gc) (List.fold_left (fun acc cp -> combine (hash_cases_pattern cp) acc) 0 cps)
 and hash_case_clauses ccs =
-  List.fold_left (fun acc cc -> combine (hash_case_clauses ccs) acc) 0 ccs
+  List.fold_left (fun acc cc -> combine (hash_case_clause cc) acc) 0 ccs
 
 
 
@@ -794,6 +806,9 @@ and hash_case_clauses ccs =
 
 let gs_gc_idx = GenSym.init ()
 let fresh_gc_idx () = GenSym.fresh gs_gc_idx
+
+let eq_gc' gc1 gc2 =
+  String.equal (show_glob_constr gc1) (show_glob_constr gc2)
 
 module GlobConstrHash =
   struct
@@ -815,83 +830,89 @@ let clear_tacst_low_gcM () = tacst_low_gcM := IntMap.empty
 let dump_low_gcM () = 
   IntMap.iter (fun k v -> ml4tp_write (Printf.sprintf "%d: %s\n" k v)) !tacst_low_gcM
 
+(* Keep track of new-bindings added *)
+let new_low_gcs = ref []
+let clear_new_low_gcs () = new_low_gcs := []
+let add_new_low_gcs v = new_low_gcs := v :: !new_low_gcs
+
 
 let with_gc_idx gc value =
   let idx = fresh_gc_idx () in
   GlobConstrHashtbl.add (gc_shareM) gc idx;
   tacst_low_gcM := IntMap.add idx value !tacst_low_gcM;
+  add_new_low_gcs (idx, value);
   idx
 
 
 (* Print out sexprs but with indicies for terms *)
-let rec share_glob_constr gc =
-  match GlobConstrHashtbl.find_opt (gc_shareM) gc with
+let rec share_glob_constr glob_constr =
+  match GlobConstrHashtbl.find_opt (gc_shareM) glob_constr with
   | Some idx -> idx
-  | None -> 
-      match gc with
+  | None ->
+      match glob_constr with
       | GRef (_, gr, _) ->
-          with_gc_idx gc (Printf.sprintf "(! %s)" (show_global_reference gr))
+          with_gc_idx glob_constr (Printf.sprintf "(! %s)" (show_global_reference gr))
       | GVar (_, id) ->
-          with_gc_idx gc (Printf.sprintf "(V %s)" (show_id id))
+          with_gc_idx glob_constr (Printf.sprintf "(V %s)" (show_id id))
       | GEvar (_, en, args) ->
           let f (id, gc) = Printf.sprintf "(%s %d)" (show_id id) (share_glob_constr gc) in
-          with_gc_idx gc (Printf.sprintf "(E %s %s)" (show_id en) (show_sexpr_ls f args))
+          with_gc_idx glob_constr (Printf.sprintf "(E %s %s)" (show_id en) (show_sexpr_ls f args))
       | GPatVar (_, (b, pv)) ->
-          with_gc_idx gc (Printf.sprintf "(PV %b %s)" b (show_id pv))
+          with_gc_idx glob_constr (Printf.sprintf "(PV %b %s)" b (show_id pv))
       | GApp (_, gc, gcs) ->
           let idx = share_glob_constr gc in
           let idxs = share_glob_constrs gcs in
-          with_gc_idx gc (Printf.sprintf "A %d %s" idx idxs)
+          with_gc_idx glob_constr (Printf.sprintf "(A %d %s)" idx idxs)
       | GLambda (_, n, bk, gc1, gc2) ->
           let sn = show_name n in
           let sbk = (show_binding_kind bk) in
           let idx1 = share_glob_constr gc1 in
           let idx2 = share_glob_constr gc2 in
-          with_gc_idx gc (Printf.sprintf "(L %s %s %d %d)" sn sbk idx1 idx2)
+          with_gc_idx glob_constr (Printf.sprintf "(L %s %s %d %d)" sn sbk idx1 idx2)
       | GProd (_, n, bk, gc1, gc2) ->
           let sn = show_name n in
           let sbk = (show_binding_kind bk) in
           let idx1 = share_glob_constr gc1 in
           let idx2 = share_glob_constr gc2 in
-          with_gc_idx gc (Printf.sprintf "(P %s %s %d %d)" sn sbk idx1 idx2)
+          with_gc_idx glob_constr (Printf.sprintf "(P %s %s %d %d)" sn sbk idx1 idx2)
       | GLetIn (_, n, gc1, gc2) ->
           let sn = show_name n in
           let idx1 = share_glob_constr gc1 in
           let idx2 = share_glob_constr gc2 in
-          with_gc_idx gc (Printf.sprintf "(LI %s %d %d)" sn idx1 idx2)
+          with_gc_idx glob_constr (Printf.sprintf "(LI %s %d %d)" sn idx1 idx2)
       | GCases (_, csty, m_gc, tups, ccs) ->
           let scsty = show_case_style csty in
           let sm_gc = show_maybe share_glob_constr' m_gc in
           let stups = show_tomatch_tuples share_glob_constr' tups in
           let sccs = show_case_clauses share_glob_constr' ccs in
-          with_gc_idx gc (Printf.sprintf "(C %s %s %s %s)" scsty sm_gc stups sccs)
+          with_gc_idx glob_constr (Printf.sprintf "(C %s %s %s %s)" scsty sm_gc stups sccs)
       | GLetTuple (_, ns, arg, gc1, gc2) ->          
           let names = show_sexpr_ls show_name ns in
           let f (name, m_gc) = Printf.sprintf "(%s %s)" (show_name name) (show_maybe share_glob_constr' m_gc) in
           let idx1 = share_glob_constr gc1 in
           let idx2 = share_glob_constr gc2 in
-          with_gc_idx gc (Printf.sprintf "(LT %s %s %d %d)" names (f arg) idx1 idx2)      
+          with_gc_idx glob_constr (Printf.sprintf "(LT %s %s %d %d)" names (f arg) idx1 idx2)      
       | GIf (_, gc, (n, m_gc), gc2, gc3) ->
           let idx = share_glob_constr gc in
           let o = Printf.sprintf "(%s %s)" (show_name n) (show_maybe share_glob_constr' m_gc) in
           let idx2 = share_glob_constr gc2 in
           let idx3 = share_glob_constr gc3 in
-          with_gc_idx gc (Printf.sprintf "I %d %s %d %d" idx o idx2 idx3)
+          with_gc_idx glob_constr (Printf.sprintf "(I %d %s %d %d)" idx o idx2 idx3)
       | GRec (_, fk, ids, gdss, gcs1, gcs2) ->
           let sfk = show_fix_kind share_glob_constr' fk in
           let sids = show_sexpr_arr show_id ids in
           let sgdss = show_sexpr_arr (show_sexpr_ls (show_glob_decl share_glob_constr')) gdss in
           let idxs1 = share_glob_constr_arr gcs1 in
           let idxs2 = share_glob_constr_arr gcs2 in
-          with_gc_idx gc (Printf.sprintf "(R %s %s %s %s %s)" sfk sids sgdss idxs1 idxs2)
+          with_gc_idx glob_constr (Printf.sprintf "(R %s %s %s %s %s)" sfk sids sgdss idxs1 idxs2)
       | GSort (_, gsort) ->
-          with_gc_idx gc (Printf.sprintf "(S %s)" (show_glob_sort gsort))
+          with_gc_idx glob_constr (Printf.sprintf "(S %s)" (show_glob_sort gsort))
       | GHole (_, k, ipne, m_gga) ->
-          with_gc_idx gc (Printf.sprintf "(H %s %s %s)" (show_evar_kinds k) (show_intro_pattern_naming_expr ipne) (show_maybe show_generic_arg m_gga))
+          with_gc_idx glob_constr (Printf.sprintf "(H %s %s %s)" (show_evar_kinds k) (show_intro_pattern_naming_expr ipne) (show_maybe show_generic_arg m_gga))
       | GCast (_, gc, gc_ty) ->
           let idx = share_glob_constr gc in
           let sgc_ty = show_cast_type share_glob_constr' gc_ty in
-          with_gc_idx gc (Printf.sprintf "(T %d %s)" idx sgc_ty)
+          with_gc_idx glob_constr (Printf.sprintf "(T %d %s)" idx sgc_ty)
 and share_glob_constr' gc =
   string_of_int (share_glob_constr gc)
 and share_glob_constrs gcs = 
@@ -1273,6 +1294,12 @@ and show_tac_arr tacs =
 let tacst_ctx_ppM : (int * string * string option) IntMap.t ref = ref IntMap.empty
 let clear_tacst_ctx_ppM () = tacst_ctx_ppM := IntMap.empty
 let add_tacst_ctx_ppM key value = tacst_ctx_ppM := IntMap.add key value !tacst_ctx_ppM
+let dump_pretty_tacst_ctx_gcM () =
+  let f k v =
+    match v with
+    | (gc_idx, _, _) -> ml4tp_write (Printf.sprintf "%d: %d\n" k gc_idx)
+  in
+  IntMap.iter f !tacst_ctx_ppM
 let dump_pretty_tacst_ctx_typM () =
   let f k v =
     match v with
@@ -1330,6 +1357,15 @@ let show_ctx_ldecl env sigma (typ, pr_typ, body) id =
 (* NOTE(deh): experimental *)
 let show_ctx_ldecl' env sigma (typ, body) id =
   let typ_id = share_constr typ in
+  match IntMap.find_opt typ_id !tacst_ctx_ppM with
+  | Some (gc_typ_id, _, _) ->
+      Printf.sprintf "%s %d %d" (show_id id) typ_id gc_typ_id
+  | None -> 
+      let gc_typ_id = share_glob_constr (detype env sigma typ) in
+      let pr_typ = pp2str (pr_ltype_env env sigma typ) in
+      add_tacst_ctx_ppM typ_id (gc_typ_id, pr_typ, None);
+      Printf.sprintf "%s %d %d" (show_id id) typ_id gc_typ_id
+  (*
   if IntMap.mem typ_id !tacst_ctx_ppM
   then Printf.sprintf "%s %d" (show_id id) typ_id
   else
@@ -1337,6 +1373,7 @@ let show_ctx_ldecl' env sigma (typ, body) id =
     let pr_typ = pp2str (pr_ltype_env env sigma typ) in
     add_tacst_ctx_ppM typ_id (typ_gc, pr_typ, None);
     Printf.sprintf "%s %d" (show_id id) typ_id
+  *)
       
 let show_var_list_decl env sigma (l, c, typ) =
   let pbody = match c with
@@ -1393,6 +1430,7 @@ let add_goal cid env sigma concl =
   tacst_goalM := IntMap.add cid (pp2str (pr_goal_concl_style_env env sigma concl)) !tacst_goalM
 let add_goal' env sigma concl = 
   let concl_id = share_constr concl in
+  (*
   if IntMap.mem concl_id !tacst_goalM 
   then concl_id
   else
@@ -1401,6 +1439,15 @@ let add_goal' env sigma concl =
     add_tacst_ctx_ppM concl_id (gc_concl, pr_concl, None);
     tacst_goalM := IntMap.add concl_id pr_concl !tacst_goalM;
     concl_id
+  *)
+  match IntMap.find_opt concl_id !tacst_ctx_ppM with
+  | Some (gc_concl, _, _) -> (concl_id, gc_concl)
+  | None ->
+      let gc_concl = share_glob_constr (detype env sigma concl) in
+      let pr_concl = pp2str (pr_goal_concl_style_env env sigma concl) in
+      add_tacst_ctx_ppM concl_id (gc_concl, pr_concl, None);
+      tacst_goalM := IntMap.add concl_id pr_concl !tacst_goalM;
+      (concl_id, gc_concl)
 
 (* NOTE(deh): No print because it's in shareM *)
 let dump_pretty_tacst_goalM () = 
@@ -1434,7 +1481,7 @@ let f_incout = ref true
 let set_incout b = f_incout := b
 
 (* Keep track of outputted shared ASTs *)
-module IntSet = Set.Make(struct type t = int let compare = compare end)
+(*
 let outputted_constrS = ref (IntSet.empty)
 let clear_outputted_constrS () = outputted_constrS := IntSet.empty
 let dump_outputted_constrS () =
@@ -1442,8 +1489,10 @@ let dump_outputted_constrS () =
 
 let outputted_gcS = ref IntSet.empty
 let clear_outputted_gcS () = outputted_gcS := IntSet.empty
+*)
 
 let dump_low_incr_constrM () =
+  (*
   let f constr_idx constr_val =
     if IntSet.mem constr_idx !outputted_constrS
     then ()
@@ -1451,40 +1500,23 @@ let dump_low_incr_constrM () =
       (* Output constr table *)
       outputted_constrS := IntSet.add constr_idx !outputted_constrS;
       ml4tp_write (Printf.sprintf "%d: %s\n" constr_idx constr_val)
-      (*
-      ml4tp_write (Printf.sprintf "Looking for %d in\n" constr_idx);
-      IntMap.iter (fun k v -> ml4tp_write (Printf.sprintf "%d " k)) !tacst_ctx_ppM;
-      ml4tp_write "\n";
-      let (gc_val, _, _) = IntMap.find constr_idx !tacst_ctx_ppM in
-      ml4tp_write (Printf.sprintf "%d: %s\n" constr_idx gc_val)
-      *)
     end
   in
-  (*
-  let g gc_idx (gc_val, _, _) =
-    if IntSet.mem gc_idx !outputted_constrS
-    then ()
-    else ml4tp_write (Printf.sprintf "%d: %d\n" gc_idx gc_val)
-  in
   *)
-  let h gc_idx gc_val =
-    if IntSet.mem gc_idx !outputted_gcS
-    then ()
-    else
-      outputted_gcS := IntSet.add gc_idx !outputted_gcS;
-      ml4tp_write (Printf.sprintf "%d: %s\n" gc_idx gc_val)
-  in
   if !f_incout
-  then
-    (ml4tp_write "bg(inc)\n";
-     (* IntMap.iter g !tacst_ctx_ppM; *)
-     IntMap.iter h !tacst_low_constrM;
-     ml4tp_write "Constrs\n";
-     IntMap.iter f !tacst_low_constrM;
-     (* NOTE(deh): switch for hashtable *)
-     (* IntTbl.iter f tacst_low_constrM; *)
-     ml4tp_write "en(inc)\n")
-  else ()
+  then begin
+    ml4tp_write "bg(inc)\n";
+    List.iter (fun (gc_idx, gc_val) -> ml4tp_write (Printf.sprintf "%d: %s\n" gc_idx gc_val)) (List.rev !new_low_gcs);
+    ml4tp_write "Constrs\n";
+    List.iter (fun (constr_idx, constr_val) -> ml4tp_write (Printf.sprintf "%d: %s\n" constr_idx constr_val)) (List.rev !new_low_constrs);
+    (* IntMap.iter f !tacst_low_constrM; *)
+    (* NOTE(deh): switch for hashtable *)
+    (* IntTbl.iter f tacst_low_constrM; *)
+    ml4tp_write "en(inc)\n"
+  end
+  else ();
+  clear_new_low_constrs ();
+  clear_new_low_gcs ()
 
 
 
@@ -1498,15 +1530,16 @@ let initialize_proof () =
   GenSym.reset gs3;
   GenSym.reset gs4;
   GenSym.reset gs_constridx;
+  GenSym.reset gs_gc_idx;
   GenSym.reset gs_anon;
   clear_tacst_ctx_ppM ();
   clear_tacst_goalM ();
   clear_constr_shareM ();
   clear_tacst_low_constrM ();
+  (* clear_outputted_constrS (); *)
   clear_gc_shareM ();
-  clear_tacst_low_gcM ();
-  clear_outputted_constrS ();
-  clear_outputted_gcS ()
+  clear_tacst_low_gcM ()
+  (* clear_outputted_gcS () *)
 
 let finalize_proof () =
   ml4tp_write "Constrs\n";
