@@ -12,6 +12,7 @@ open Glob_term
 open Globnames
 open Constrexpr
 open Genarg
+open Impargs
 
 open CErrors
 
@@ -501,6 +502,23 @@ let show_glob_decl show_gc (name, bk, m_c, c) =
   Printf.sprintf "%s %s %s %s" (show_name name) (show_binding_kind bk) (show_maybe show_gc m_c) (show_gc c)
 
 
+let show_argument_position ap =
+  match ap with
+  | Conclusion -> "C"
+  | Hyp i -> Printf.sprintf "(H %d)" i
+
+
+let show_implicit_explanation ie =
+  match ie with
+  | DepRigid ap ->
+      Printf.sprintf "(R %s)" (show_argument_position ap)
+  | DepFlex ap ->
+      Printf.sprintf "(F %s)" (show_argument_position ap)
+  | DepFlexAndRigid (ap1, ap2) ->
+      Printf.sprintf "(B %s %s)" (show_argument_position ap1) (show_argument_position ap2)
+  | Manual ->
+      "M"
+
 let rec show_glob_constr gc =
   match gc with
   | GRef (l, gr, _) ->
@@ -513,7 +531,14 @@ let rec show_glob_constr gc =
   | GPatVar (l, (b, pv)) ->
       Printf.sprintf "(PV %b %s)" b (show_id pv)
   | GApp (l, gc, gcs) ->
-      Printf.sprintf "(A %s %s)" (show_glob_constr gc) (show_glob_constrs gcs)
+      begin match gc with
+      | GRef (l, gr, _) ->
+          let imps = implicits_of_global gr in
+          let f (id, ie, (mi, fi)) = Printf.sprintf "(%s %s)" (show_id id) (show_implicit_explanation ie) in
+          Printf.sprintf "(A %s %s %s)" (show_glob_constr gc) (show_glob_constrs gcs) (show_sexpr_ls (show_sexpr_ls (show_maybe f)) (List.map snd imps))
+      | _ ->
+          Printf.sprintf "(A %s %s ())" (show_glob_constr gc) (show_glob_constrs gcs)
+      end
   | GLambda (l, n, bk, gc1, gc2) ->
       Printf.sprintf "(L %s %s %s %s)" (show_name n) (show_binding_kind bk) (show_glob_constr gc1) (show_glob_constr gc2)
   | GProd (l, n, bk, gc1, gc2) ->
@@ -862,7 +887,14 @@ let rec share_glob_constr glob_constr =
       | GApp (_, gc, gcs) ->
           let idx = share_glob_constr gc in
           let idxs = share_glob_constrs gcs in
-          with_gc_idx glob_constr (Printf.sprintf "(A %d %s)" idx idxs)
+          begin match gc with
+          | GRef (_, gr, _) ->
+              let imps = implicits_of_global gr in
+              let f (id, ie, (mi, fi)) = Printf.sprintf "(%s %s)" (show_id id) (show_implicit_explanation ie) in
+              let iargs = (show_sexpr_ls (show_sexpr_ls (show_maybe f)) (List.map snd imps)) in
+              with_gc_idx glob_constr (Printf.sprintf "(A %d %s %s)" idx idxs iargs)
+          | _ -> with_gc_idx glob_constr (Printf.sprintf "(A %d %s ())" idx idxs)
+          end
       | GLambda (_, n, bk, gc1, gc2) ->
           let sn = show_name n in
           let sbk = (show_binding_kind bk) in
