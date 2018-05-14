@@ -499,7 +499,7 @@ let show_fix_kind show_gc fk =
   | GCoFix i ->
       Printf.sprintf "(C %d)" i
 let show_glob_decl show_gc (name, bk, m_c, c) =
-  Printf.sprintf "%s %s %s %s" (show_name name) (show_binding_kind bk) (show_maybe show_gc m_c) (show_gc c)
+  Printf.sprintf "(%s %s %s %s)" (show_name name) (show_binding_kind bk) (show_maybe show_gc m_c) (show_gc c)
 
 
 let show_argument_position ap =
