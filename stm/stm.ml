@@ -2437,7 +2437,7 @@ let process_transaction ?(newtip=Stateid.fresh ()) ~tty
       prerr_endline (fun () ->
         "  classified as: " ^ string_of_vernac_classification c);
       let (vt, vw) = c in
-      Pml4tp.show_vernac_typ_exp vt expr;
+      Ptcoq.show_vernac_typ_exp vt expr;
       match c with
       (* PG stuff *)    
       | VtStm(VtPG,false), VtNow -> vernac_interp Stateid.dummy x; `Ok

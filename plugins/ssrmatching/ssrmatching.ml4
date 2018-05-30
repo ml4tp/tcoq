@@ -1384,16 +1384,14 @@ END
 
 
 (* ============= *)
-(* ML4TP *)
+(* PTCOQ *)
 (* TODO *) 
 
 let show_term (_, (c, _)) =
-  (* Printf.sprintf "\"%s\"" (Pp.string_of_ppcmds (pr_term c)) *)
-  Pml4tp.show_glob_constr c
+  Ptcoq.show_glob_constr c
 
 let show_cpattern cp =
   show_term cp
-  (* Printf.sprintf "\"%s\"" (Pp.string_of_ppcmds (pr_cpattern cp)) *)
 
 let show_pattern = function
   | T t ->
@@ -1410,7 +1408,7 @@ let show_pattern = function
       Printf.sprintf "(EAXT %s %s %s)" (show_term e) (show_term x) (show_term t)
 
 let show_rpattern rp = show_pattern rp
-(* let _ = Pml4tp.declare_extra_genarg_showrule1 wit_ssrrule_ne show_rule *)
+(* let _ = Ptcoq.declare_extra_genarg_showrule1 wit_ssrrule_ne show_rule *)
 (* ============= *)
 
 

@@ -19,7 +19,7 @@ open CErrors
 
 (* [Note] 
  *
- * Contains functionality for ML4TP. Prints out the tactic state of a Coq proof.
+ * Contains functionality for TCoq. Prints out the tactic state of a Coq proof.
  * We output a "shared" representation of a Coq tactic state.
  *   1. Low-level format of expressions uses sharing
  *   2. Low-level format of tactic states outputs identifiers, types as shared
@@ -44,8 +44,8 @@ let dump_ch =
   match Sys.getenv_opt "TCOQ_DUMP" with
   | Some f -> open_out "/tmp/tcoq.log"
   | None -> stdout
-let ml4tp_write s = Printf.fprintf dump_ch "%s" s
-let ml4tp_flush () = flush dump_ch
+let tcoq_write s = Printf.fprintf dump_ch "%s" s
+let tcoq_flush () = flush dump_ch
 
 
 
@@ -164,15 +164,8 @@ module IntTbl = Hashtbl.Make(struct type t = int let equal i j = i = j let hash 
 let tacst_low_constrM = ref (IntMap.empty)
 let clear_tacst_low_constrM () = tacst_low_constrM := IntMap.empty
 let dump_low_constrM () = 
-  IntMap.iter (fun k v -> ml4tp_write (Printf.sprintf "%d: %s\n" k v)) !tacst_low_constrM
+  IntMap.iter (fun k v -> tcoq_write (Printf.sprintf "%d: %s\n" k v)) !tacst_low_constrM
 
-(* NOTE(deh): switch for hashtable *)
-(*
-let tacst_low_constrM = IntTbl.create 4000
-let clear_tacst_low_constrM () = IntTbl.clear tacst_low_constrM
-let dump_low_constrM () = 
-  IntTbl.iter (fun k v -> ml4tp_write (Printf.sprintf "%d: %s\n" k v)) tacst_low_constrM
-*)
 
 (* Keep track of new-bindings added *)
 let new_low_constrs = ref []
@@ -183,8 +176,6 @@ let with_constr_idx constr value =
   let idx = fresh_constridx () in
   ConstrHashtbl.add (constr_shareM) constr idx;
   tacst_low_constrM := IntMap.add idx value !tacst_low_constrM;
-  (* NOTE(deh): switch for hashtable *)
-  (* IntTbl.add tacst_low_constrM idx value; *)
   add_new_low_constrs (idx, value);
   idx
 
@@ -652,7 +643,6 @@ and eq_gc_ls gcs gcs' =
   eq_ls eq_gc gcs gcs'
 and eq_gc_arr gcs gcs' =
   eq_arr eq_gc gcs gcs'
-  (* Array.for_all (fun x -> x) (Array.map2 (fun gc gc' -> eq_gc gc gc') gcs gcs') *)
 
 and eq_cast_type ct ct' = 
   match ct, ct' with
@@ -853,7 +843,7 @@ let clear_gc_shareM () = GlobConstrHashtbl.clear gc_shareM
 let tacst_low_gcM = ref (IntMap.empty)
 let clear_tacst_low_gcM () = tacst_low_gcM := IntMap.empty
 let dump_low_gcM () = 
-  IntMap.iter (fun k v -> ml4tp_write (Printf.sprintf "%d: %s\n" k v)) !tacst_low_gcM
+  IntMap.iter (fun k v -> tcoq_write (Printf.sprintf "%d: %s\n" k v)) !tacst_low_gcM
 
 (* Keep track of new-bindings added *)
 let new_low_gcs = ref []
@@ -1049,7 +1039,7 @@ let rec show_induction_clause (wbs_da, (ml_ipne, movl_oaipe), m_ce) =
   let g' = show_maybe (show_or_var g) in
   Printf.sprintf "(%s %s %s %s)" (show_destruction_arg (show_with_bindings show_gtrm) wbs_da) (show_maybe f ml_ipne) (g' movl_oaipe) (show_maybe show_clause_expr m_ce)
 and show_induction_clause_list (ics, m_bs) =
-  Printf.sprintf "(%s, %s)" (show_sexpr_ls show_induction_clause ics) (show_maybe (show_with_bindings show_gtrm) m_bs)
+  Printf.sprintf "(%s %s)" (show_sexpr_ls show_induction_clause ics) (show_maybe (show_with_bindings show_gtrm) m_bs)
 
 
 let rec show_inversion_strength is =
@@ -1329,62 +1319,28 @@ let add_tacst_ctx_ppM key value = tacst_ctx_ppM := IntMap.add key value !tacst_c
 let dump_pretty_tacst_ctx_gcM () =
   let f k v =
     match v with
-    | (gc_idx, _, _) -> ml4tp_write (Printf.sprintf "%d: %d\n" k gc_idx)
+    | (gc_idx, _, _) -> tcoq_write (Printf.sprintf "%d: %d\n" k gc_idx)
   in
   IntMap.iter f !tacst_ctx_ppM
 let dump_pretty_tacst_ctx_typM () =
   let f k v =
     match v with
-    | (_, pp_typ, _) -> ml4tp_write (Printf.sprintf "%d: %s\n" k pp_typ)
+    | (_, pp_typ, _) -> tcoq_write (Printf.sprintf "%d: %s\n" k pp_typ)
   in
   IntMap.iter f !tacst_ctx_ppM
 let dump_pretty_tacst_ctx_bodyM () =
   let f k v =
     match v with
-    | (_, _, Some pp_body) -> ml4tp_write (Printf.sprintf "%d: %s\n" k pp_body)
+    | (_, _, Some pp_body) -> tcoq_write (Printf.sprintf "%d: %s\n" k pp_body)
     | (_, _, None) -> ()
   in
   IntMap.iter f !tacst_ctx_ppM
 
-(* NOTE(deh): switch for hashtable *)
-(*
-let tacst_ctx_ppM = IntTbl.create 500
-let clear_tacst_ctx_ppM () = IntTbl.clear tacst_ctx_ppM
-let add_tacst_ctx_ppM key value = IntTbl.add tacst_ctx_ppM key value
-let dump_pretty_tacst_ctx_typM () =
-  let f k v =
-    match v with
-    | (pp_typ, _) -> ml4tp_write (Printf.sprintf "%d: %s\n" k pp_typ)
-  in
-  IntTbl.iter f tacst_ctx_ppM
-let dump_pretty_tacst_ctx_bodyM () =
-  let f k v =
-    match v with
-    | (_, Some pp_body) -> ml4tp_write (Printf.sprintf "%d: %s\n" k pp_body)
-    | (_, None) -> ()
-  in
-  IntTbl.iter f tacst_ctx_ppM
-*)
 
 let detype env sigma constr = 
   let avoid = Termops.ids_of_context env in
   Detyping.detype ~lax:false true avoid env sigma constr
 
-(*
-let show_ctx_ldecl env sigma (typ, pr_typ, body) id =
-  match body with
-  | Some (body, pp_body) ->
-      let typ_id = share_constr typ in 
-      let body_id = share_constr body in
-      let typ_gc = show_glob_constr (detype env sigma typ) in
-      add_tacst_ctx_ppM typ_id (typ_gc, pr_typ, Some pp_body);
-      Printf.sprintf "%s %d %d" (show_id id) typ_id body_id
-  | None ->
-      let typ_id = share_constr typ in
-      let typ_gc = show_glob_constr (detype env sigma typ) in
-      add_tacst_ctx_ppM typ_id (typ_gc, pr_typ, None);
-      Printf.sprintf "%s %d" (show_id id) typ_id
-*)
 
 (* NOTE(deh): experimental *)
 let show_ctx_ldecl' env sigma (typ, body) id =
@@ -1397,15 +1353,6 @@ let show_ctx_ldecl' env sigma (typ, body) id =
       let pr_typ = pp2str (pr_ltype_env env sigma typ) in
       add_tacst_ctx_ppM typ_id (gc_typ_id, pr_typ, None);
       Printf.sprintf "%s %d %d" (show_id id) typ_id gc_typ_id
-  (*
-  if IntMap.mem typ_id !tacst_ctx_ppM
-  then Printf.sprintf "%s %d" (show_id id) typ_id
-  else
-    let typ_gc = share_glob_constr (detype env sigma typ) in
-    let pr_typ = pp2str (pr_ltype_env env sigma typ) in
-    add_tacst_ctx_ppM typ_id (typ_gc, pr_typ, None);
-    Printf.sprintf "%s %d" (show_id id) typ_id
-  *)
       
 let show_var_list_decl env sigma (l, c, typ) =
   let pbody = match c with
@@ -1415,7 +1362,6 @@ let show_var_list_decl env sigma (l, c, typ) =
         let pb = if isCast c then surround pb else pb in
         Some (c, pp2str pb)
   in
-  (* List.map (show_ctx_ldecl env sigma (typ, pp2str (pr_ltype_env env sigma typ), pbody)) l *)
   List.map (show_ctx_ldecl' env sigma (typ, pbody)) l
 
 let show_rel_decl env sigma decl =
@@ -1435,7 +1381,6 @@ let show_rel_decl env sigma decl =
         let pb = if isCast c then surround pb else pb in
         Some (c, pp2str pb)
   in
-  (* show_ctx_ldecl env sigma (typ, pp2str (pr_ltype_env env sigma typ), body) id *)
   show_ctx_ldecl' env sigma (typ, body) id
 
 let show_context env sigma =
@@ -1462,16 +1407,6 @@ let add_goal cid env sigma concl =
   tacst_goalM := IntMap.add cid (pp2str (pr_goal_concl_style_env env sigma concl)) !tacst_goalM
 let add_goal' env sigma concl = 
   let concl_id = share_constr concl in
-  (*
-  if IntMap.mem concl_id !tacst_goalM 
-  then concl_id
-  else
-    let gc_concl = share_glob_constr (detype env sigma concl) in
-    let pr_concl = pp2str (pr_goal_concl_style_env env sigma concl) in
-    add_tacst_ctx_ppM concl_id (gc_concl, pr_concl, None);
-    tacst_goalM := IntMap.add concl_id pr_concl !tacst_goalM;
-    concl_id
-  *)
   match IntMap.find_opt concl_id !tacst_ctx_ppM with
   | Some (gc_concl, _, _) -> (concl_id, gc_concl)
   | None ->
@@ -1483,17 +1418,7 @@ let add_goal' env sigma concl =
 
 (* NOTE(deh): No print because it's in shareM *)
 let dump_pretty_tacst_goalM () = 
-  IntMap.iter (fun k v -> ml4tp_write (Printf.sprintf "%d: %s\n" k v)) !tacst_goalM
-
-(* NOTE(deh): switch for hashtable *)
-(*
-let tacst_goalM = IntTbl.create 500
-let clear_tacst_goalM () = IntTbl.clear tacst_goalM
-let add_goal cid env sigma concl =
-  IntTbl.add tacst_goalM cid (pp2str (pr_goal_concl_style_env env sigma concl))
-let dump_pretty_tacst_goalM () = 
-  IntTbl.iter (fun k v -> ml4tp_write (Printf.sprintf "%d: %s\n" k v)) tacst_goalM
-*)
+  IntMap.iter (fun k v -> tcoq_write (Printf.sprintf "%d: %s\n" k v)) !tacst_goalM
 
 
 
@@ -1512,39 +1437,15 @@ let dump_pretty_tacst_goalM () =
 let f_incout = ref true
 let set_incout b = f_incout := b
 
-(* Keep track of outputted shared ASTs *)
-(*
-let outputted_constrS = ref (IntSet.empty)
-let clear_outputted_constrS () = outputted_constrS := IntSet.empty
-let dump_outputted_constrS () =
-  IntSet.iter (fun k -> ml4tp_write (Printf.sprintf "%d " k)) !outputted_constrS
-
-let outputted_gcS = ref IntSet.empty
-let clear_outputted_gcS () = outputted_gcS := IntSet.empty
-*)
 
 let dump_low_incr_constrM () =
-  (*
-  let f constr_idx constr_val =
-    if IntSet.mem constr_idx !outputted_constrS
-    then ()
-    else begin
-      (* Output constr table *)
-      outputted_constrS := IntSet.add constr_idx !outputted_constrS;
-      ml4tp_write (Printf.sprintf "%d: %s\n" constr_idx constr_val)
-    end
-  in
-  *)
   if !f_incout
   then begin
-    ml4tp_write "bg(inc)\n";
-    List.iter (fun (gc_idx, gc_val) -> ml4tp_write (Printf.sprintf "%d: %s\n" gc_idx gc_val)) (List.rev !new_low_gcs);
-    ml4tp_write "Constrs\n";
-    List.iter (fun (constr_idx, constr_val) -> ml4tp_write (Printf.sprintf "%d: %s\n" constr_idx constr_val)) (List.rev !new_low_constrs);
-    (* IntMap.iter f !tacst_low_constrM; *)
-    (* NOTE(deh): switch for hashtable *)
-    (* IntTbl.iter f tacst_low_constrM; *)
-    ml4tp_write "en(inc)\n"
+    tcoq_write "bg(inc)\n";
+    List.iter (fun (gc_idx, gc_val) -> tcoq_write (Printf.sprintf "%d: %s\n" gc_idx gc_val)) (List.rev !new_low_gcs);
+    tcoq_write "Constrs\n";
+    List.iter (fun (constr_idx, constr_val) -> tcoq_write (Printf.sprintf "%d: %s\n" constr_idx constr_val)) (List.rev !new_low_constrs);
+    tcoq_write "en(inc)\n"
   end
   else ();
   clear_new_low_constrs ();
@@ -1568,61 +1469,37 @@ let initialize_proof () =
   clear_tacst_goalM ();
   clear_constr_shareM ();
   clear_tacst_low_constrM ();
-  (* clear_outputted_constrS (); *)
   clear_gc_shareM ();
   clear_tacst_low_gcM ()
-  (* clear_outputted_gcS () *)
 
 let finalize_proof () =
-  ml4tp_write "Constrs\n";
+  tcoq_write "Constrs\n";
   dump_low_constrM ();
-  ml4tp_write "PrTyps\n";
+  tcoq_write "PrTyps\n";
   dump_pretty_tacst_ctx_typM ();
-  ml4tp_write "PrBods\n";
+  tcoq_write "PrBods\n";
   dump_pretty_tacst_ctx_bodyM ();
-  ml4tp_write "PrGls\n";
+  tcoq_write "PrGls\n";
   dump_pretty_tacst_goalM ();
-  ml4tp_flush()
+  tcoq_flush()
 
 let rec show_vernac_typ_exp vt ve =
   match vt with
   | VtStartProof (name, _, names) -> 
       initialize_proof ();
-      ml4tp_write (Printf.sprintf "bg(pf) {!} %s {!} %s\n" name (show_ls show_id ", " names))
+      tcoq_write (Printf.sprintf "bg(pf) {!} %s {!} %s\n" name (show_ls show_id ", " names))
   | VtSideff _ -> ()
   | VtQed _ ->
       finalize_proof ();
-      ml4tp_write ("en(pf)\n")
+      tcoq_write ("en(pf)\n")
   | VtProofStep _ ->
     begin
       match ve with
-      | VernacSubproof _ -> ml4tp_write "bg(spf)\n"
-      | VernacEndSubproof -> ml4tp_write "en(spf)\n"
+      | VernacSubproof _ -> tcoq_write "bg(spf)\n"
+      | VernacEndSubproof -> tcoq_write "en(spf)\n"
       | _ -> ()
     end
   | VtProofMode _ -> ()
   | VtQuery (_, _) -> ()
   | VtStm (_, _) -> ()
   | VtUnknown -> ()
-
-
-
-(* ************************************************************************** *)
-(* Junk *)
-
-(*
-let show_red_expr_gen show_a show_b show_c reg =
-  match reg with
-  | Red b -> Printf.sprintf "(R %b)" b
-  | Hnf -> ""
-  | Simpl _ -> ""
-  | Cbv _ -> ""
-  | Cbn _ -> ""
-  | Lazy _ -> ""
-  | Unfold _ -> ""
-  | Fold _ -> ""
-  | Pattern _ -> ""
-  | ExtraRedExpr _ -> ""
-  | CbvVm _ -> ""
-  | CbvNative _ -> ""
-*)
