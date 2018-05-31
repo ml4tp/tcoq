@@ -1495,9 +1495,16 @@ let rec show_vernac_typ_exp vt ve =
   | VtProofStep _ ->
     begin
       match ve with
+      | VernacProof _ -> ()
+      | VernacFocus _ -> ()
+      | VernacUnfocus -> ()
       | VernacSubproof _ -> tcoq_write "bg(spf)\n"
       | VernacEndSubproof -> tcoq_write "en(spf)\n"
-      | _ -> ()
+      | VernacCheckGuard -> ()
+      | VernacUnfocused -> ()
+      | VernacSolveExistential _ -> ()
+      | VernacBullet _ -> tcoq_write "!@B\n"
+      | _ -> tcoq_write "!@PS\n"
     end
   | VtProofMode _ -> ()
   | VtQuery (_, _) -> ()
