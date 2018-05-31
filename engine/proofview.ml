@@ -476,7 +476,7 @@ let fold_left2_goal i s l =
   Comb.set CList.(undefined evd (flatten (rev subgoals))) >>
   return r
 
-let ml4tp_fold_left2_goal (i: Evd.evar -> 'a -> 'b -> 'b tactic) (s: 'b) (l: 'a list) : 'b tactic = fold_left2_goal i s l
+let tcoq_fold_left2_goal (i: Evd.evar -> 'a -> 'b -> 'b tactic) (s: 'b) (l: 'a list) : 'b tactic = fold_left2_goal i s l
 
 (** Dispatch tacticals are used to apply a different tactic to each
     goal under focus. They come in two flavours: [tclDISPATCH] takes a

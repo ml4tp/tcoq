@@ -716,7 +716,7 @@ let tcoq_wrap_tac' ist tac call extra call_id =
   in
     Proofview.Goal.goals >>= fun glms ->
     Proofview.tclDISPATCHL glms >>= fun gls ->
-    Proofview.ml4tp_fold_left2_goal (fun ev _ _ -> tac' ev) () gls <*>
+    Proofview.tcoq_fold_left2_goal (fun ev _ _ -> tac' ev) () gls <*>
     Proofview.tclUNIT ()
 
 let tcoq_wrap_tac ist tac call extra =

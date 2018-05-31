@@ -627,4 +627,4 @@ end
 
 (* ML4TP addition *)
 (* val fold_left2_goal : (Evar.t -> 'a -> 'b -> 'b Proofview_monad.Logical.t) -> 'b -> 'a list -> 'b Proofview_monad.Logical.t *)
-val ml4tp_fold_left2_goal : (Evd.evar -> 'a -> 'b -> 'b tactic) -> 'b -> 'a list -> 'b tactic
+val tcoq_fold_left2_goal : (Evd.evar -> 'a -> 'b -> 'b tactic) -> 'b -> 'a list -> 'b tactic
