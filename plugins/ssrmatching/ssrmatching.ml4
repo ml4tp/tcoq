@@ -1385,7 +1385,6 @@ END
 
 (* ============= *)
 (* PTCOQ *)
-(* TODO *) 
 
 let show_term (_, (c, _)) =
   Ptcoq.show_glob_constr c

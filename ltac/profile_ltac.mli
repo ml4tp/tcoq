@@ -46,5 +46,5 @@ type treenode = {
 val get_local_profiling_results : unit -> treenode
 val feedback_results : treenode -> unit
 
-(* deh(extra export kludge) *)
+(* NOTE(deh): extra reporting *)
 val string_of_call : Tacexpr.ltac_call_kind -> string

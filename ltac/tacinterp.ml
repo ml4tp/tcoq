@@ -609,7 +609,7 @@ let interp_uconstr ist env = function
 (* ************************************************************************** *)
 (* TCoq tactic state printing functions *)
 
-let tcoq_kludge ist env sigma gc =
+let tcoq_mid2kern ist env sigma gc =
   let kind = WithoutTypeConstraint in
   let constr_flags = {
     use_typeclasses = true;
@@ -640,12 +640,9 @@ let tcoq_show_ltac_call_kind lck =
   | LtacNameCall _ -> "Name"
   | LtacAtomCall _ -> "Atom"
   | LtacVarCall _ -> "Var"
-  | LtacConstrInterp (c, _) ->
-      let env = Global.env () in
-      Ptcoq.set_kludge_env env;
-      Printf.sprintf "Constr(%s)" (Ptcoq.show_glob_constr c)
+  | LtacConstrInterp (c, _) -> Printf.sprintf "Constr(%s)" (Ptcoq.show_glob_constr c)
 
-let tcoq_print_tactic kludge mode (call : Loc.t * ltac_call_kind) extra uid =
+let tcoq_print_tactic m_c mode (call : Loc.t * ltac_call_kind) extra uid =
   let name = Profile_ltac.string_of_call (snd call) in
   let loc = fst call in
   let sloc = Printf.sprintf "(%s,%d,%d)" (loc.Loc.fname) (loc.Loc.bp) (loc.Loc.ep) in
@@ -679,10 +676,9 @@ let tcoq_print_tactic kludge mode (call : Loc.t * ltac_call_kind) extra uid =
       in
       let ast_tac =
         let show_ast_tac tac' =
-          Ptcoq.set_kludge_env env;
           Ptcoq.show_tac tac'
         in
-        match (snd call, extra, kludge) with
+        match (snd call, extra, m_c) with
         | (LtacAtomCall _, Some tac, Some _) -> show_ast_tac tac
         | (LtacNotationCall _, Some tac, Some _) -> show_ast_tac tac
         | (LtacNameCall r, _, _) -> show_ast_tac (Tacenv.interp_ltac r)
@@ -731,12 +727,12 @@ let tcoq_catch_error_tac ist call_trace tac call extra =
 
 let tcoq_wrap_catchfail_tac ist tac name extra =
   let loc = dloc in 
-  let dp = DirPath.make [Names.Id.of_string "ml4tp"] in
+  let dp = DirPath.make [Names.Id.of_string "tcoq"] in
   let s = Names.KerName.make2 (Names.ModPath.MPfile dp) (Names.mk_label name) in
   let call = (loc, LtacNotationCall s) in
   tcoq_wrap_tac ist tac call extra
 
-let ml4tp_conv (tac: Proof_type.goal Evd.sigma -> Proof_type.goal list Evd.sigma) =
+let tcoq_conv (tac: Proof_type.goal Evd.sigma -> Proof_type.goal list Evd.sigma) =
   Proofview.V82.of_tactic (Proofview.V82.tactic tac)
 
 (* ************************************************************************** *)
@@ -1340,7 +1336,7 @@ and eval_tactic ist tac : unit Proofview.tactic =
       let call = LtacAtomCall t in
       push_trace(loc,call) ist (Some (TacAtom (loc, t))) >>= fun trace ->
       Profile_ltac.do_profile "eval_tactic:2" trace
-         (tcoq_catch_error_tac (Some (tcoq_kludge ist)) trace (interp_atomic ist t) (loc, call) (Some (TacAtom (loc, t))))
+         (tcoq_catch_error_tac (Some (tcoq_mid2kern ist)) trace (interp_atomic ist t) (loc, call) (Some (TacAtom (loc, t))))
   | TacFun _ | TacLetIn _ -> assert false
   | TacMatchGoal _ | TacMatch _ -> assert false
   | TacId [] -> Proofview.tclLIFT (db_breakpoint (curr_debug ist) [])
@@ -1387,13 +1383,13 @@ and eval_tactic ist tac : unit Proofview.tactic =
       Tacticals.New.tclTHENS3PARTS (interp_tactic ist t1)
 	(Array.map (interp_tactic ist) tf) (interp_tactic ist t) (Array.map (interp_tactic ist) tl)
   | TacDo (n,tac) ->
-      tcoq_wrap_catchfail_tac (Some (tcoq_kludge ist)) (Tacticals.New.tclDO (interp_int_or_var ist n) (interp_tactic ist tac)) "TacDo" (Some (TacDo (n, tac)))
+      tcoq_wrap_catchfail_tac (Some (tcoq_mid2kern ist)) (Tacticals.New.tclDO (interp_int_or_var ist n) (interp_tactic ist tac)) "TacDo" (Some (TacDo (n, tac)))
   | TacTimeout (n,tac) -> Tacticals.New.tclTIMEOUT (interp_int_or_var ist n) (interp_tactic ist tac)
   | TacTime (s,tac) -> Tacticals.New.tclTIME s (interp_tactic ist tac)
   | TacTry tac -> Tacticals.New.tclTRY (interp_tactic ist tac)
   | TacRepeat tac -> Tacticals.New.tclREPEAT (interp_tactic ist tac)
   | TacOr (tac1,tac2) ->
-      tcoq_wrap_catchfail_tac (Some (tcoq_kludge ist)) (Tacticals.New.tclOR (interp_tactic ist tac1) (interp_tactic ist tac2)) "TacOr" (Some (TacOr (tac1, tac2)))
+      tcoq_wrap_catchfail_tac (Some (tcoq_mid2kern ist)) (Tacticals.New.tclOR (interp_tactic ist tac1) (interp_tactic ist tac2)) "TacOr" (Some (TacOr (tac1, tac2)))
   | TacOnce tac ->
       Tacticals.New.tclONCE (interp_tactic ist tac)
   | TacExactlyOnce tac ->
@@ -1404,13 +1400,13 @@ and eval_tactic ist tac : unit Proofview.tactic =
         (fun () -> interp_tactic ist tt)
         (fun () -> interp_tactic ist te)
   | TacOrelse (tac1,tac2) ->
-      tcoq_wrap_catchfail_tac (Some (tcoq_kludge ist)) (Tacticals.New.tclORELSE (interp_tactic ist tac1) (interp_tactic ist tac2)) "TacOrelse" (Some (TacOrelse (tac1, tac2)))
+      tcoq_wrap_catchfail_tac (Some (tcoq_mid2kern ist)) (Tacticals.New.tclORELSE (interp_tactic ist tac1) (interp_tactic ist tac2)) "TacOrelse" (Some (TacOrelse (tac1, tac2)))
   | TacFirst l ->
-      let f tac = tcoq_wrap_catchfail_tac (Some (tcoq_kludge ist)) (interp_tactic ist tac) "TacFirstIn" (Some tac) in
-      tcoq_wrap_catchfail_tac (Some (tcoq_kludge ist)) (Tacticals.New.tclFIRST (List.map f l)) "TacFirst" (Some (TacFirst l))
+      let f tac = tcoq_wrap_catchfail_tac (Some (tcoq_mid2kern ist)) (interp_tactic ist tac) "TacFirstIn" (Some tac) in
+      tcoq_wrap_catchfail_tac (Some (tcoq_mid2kern ist)) (Tacticals.New.tclFIRST (List.map f l)) "TacFirst" (Some (TacFirst l))
   | TacSolve l ->
-      let f tac = tcoq_wrap_catchfail_tac (Some (tcoq_kludge ist)) (interp_tactic ist tac) "TacSolveIn" (Some tac) in
-      tcoq_wrap_catchfail_tac (Some (tcoq_kludge ist)) (Tacticals.New.tclSOLVE (List.map f l)) "TacSolve" (Some (TacSolve l))
+      let f tac = tcoq_wrap_catchfail_tac (Some (tcoq_mid2kern ist)) (interp_tactic ist tac) "TacSolveIn" (Some tac) in
+      tcoq_wrap_catchfail_tac (Some (tcoq_mid2kern ist)) (Tacticals.New.tclSOLVE (List.map f l)) "TacSolve" (Some (TacSolve l))
   | TacComplete tac -> Tacticals.New.tclCOMPLETE (interp_tactic ist tac)
   | TacArg a -> interp_tactic ist (TacArg a)
   | TacInfo tac ->
@@ -1450,7 +1446,7 @@ and eval_tactic ist tac : unit Proofview.tactic =
       in
       let call = (loc, LtacNotationCall s) in
       let open Proofview.Notations in
-      tcoq_wrap_tac (Some (tcoq_kludge ist)) (Ftactic.run tac (fun () -> Proofview.tclUNIT ())) call (Some (TacAlias (loc,s,l)))
+      tcoq_wrap_tac (Some (tcoq_mid2kern ist)) (Ftactic.run tac (fun () -> Proofview.tclUNIT ())) call (Some (TacAlias (loc,s,l)))
   | TacML (loc,opn,l) ->
       let call = (loc,LtacMLCall tac) in
       push_trace call ist (Some (TacML (loc,opn,l))) >>= fun trace ->
@@ -1459,7 +1455,7 @@ and eval_tactic ist tac : unit Proofview.tactic =
       let args = Ftactic.List.map_right (fun a -> interp_tacarg ist a) l in
       let tac args =
         let name () = Pptactic.pr_extend (fun v -> print_top_val () v) 0 opn args in
-        Proofview.Trace.name_tactic name (tcoq_catch_error_tac (Some (tcoq_kludge ist)) trace (tac args ist) call (Some (TacML (loc,opn,l))))
+        Proofview.Trace.name_tactic name (tcoq_catch_error_tac (Some (tcoq_mid2kern ist)) trace (tac args ist) call (Some (TacML (loc,opn,l))))
       in
       Ftactic.run args tac
 

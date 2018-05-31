@@ -19,8 +19,11 @@ open CErrors
 
 (* [Note] 
  *
+ * 2018 The GamePad Authors.
+ *
  * Contains functionality for TCoq. Prints out the tactic state of a Coq proof.
- * We output a "shared" representation of a Coq tactic state.
+ * We dump out the kernel-level AST and the mid-level AST. We output a "shared"
+ * representation of a Coq tactic state.
  *   1. Low-level format of expressions uses sharing
  *   2. Low-level format of tactic states outputs identifiers, types as shared
  *      expressions, and shared goal
@@ -28,9 +31,8 @@ open CErrors
  * We may have been able to use Coq-SerAPI, but I don't think it handles
  *   1. Outputting of shared representation
  *   2. Breaking up of semicolons
- *
- * I have no idea why using a hashtable doesn't speed up compared to hashmap version.
- * I commented out the hashtable version.
+ * 
+ * Wishlist: dump out the kernel-level AST in sexpr format.
  *)
 
 
@@ -79,12 +81,6 @@ let fresh_gs3 () = GenSym.fresh gs3
 
 let gs4 = GenSym.init ()
 let fresh_gs4 () = GenSym.fresh gs4
-
-
-(* NOTE(deh): does this have any uses? *)
-let kludge_env = ref Environ.empty_env
-let set_kludge_env env = kludge_env := env
-
 
 
 (* ************************************************************************** *)
@@ -264,7 +260,7 @@ let show_constr c = string_of_int (share_constr c)
 (* ************************************************************************** *)
 (* Glob_constr printing *)
 
-(* Note(deh): 
+(* NOTE(deh): 
  *
  * We need this layer because Coq tactics use constr_expr/glob_constr.
  *
@@ -828,7 +824,7 @@ let eq_gc' gc1 gc2 =
 module GlobConstrHash =
   struct
     type t = glob_constr
-    let equal c1 c2 = eq_gc c1 c2   (* Note(deh): problem potentially ... *)
+    let equal c1 c2 = eq_gc c1 c2
     let hash c = hash_gc c
   end
 module GlobConstrHashtbl = Hashtbl.Make(GlobConstrHash)
@@ -947,7 +943,7 @@ and share_glob_constr_arr gcs =
 (* ************************************************************************** *)
 (* Ltac printing *)
 
-(* Note(deh): 
+(* NOTE(deh): 
  *
  * A global term is a pair of
  * 1. a [glob_constr]

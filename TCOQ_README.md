@@ -25,4 +25,6 @@ You can use TCoq like any other version of (Coq)[https://coq.inria.fr/].
 
 1. printing/ptcoq.ml
 2. ltac/tacinterp.ml
-3. ltac/profile_ltac.mli
+3. plugins/ssrmatching/ssrmatching.ml4
+4. ltac/profile_ltac.mli
+5. stm/stm.ml
