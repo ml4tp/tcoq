@@ -625,6 +625,5 @@ module Notations : sig
     { s_enter : 'r. ('a, 'r) Goal.t -> ('b, 'r) Sigma.sigma }
 end
 
-(* ML4TP addition *)
-(* val fold_left2_goal : (Evar.t -> 'a -> 'b -> 'b Proofview_monad.Logical.t) -> 'b -> 'a list -> 'b Proofview_monad.Logical.t *)
+(* NOTE(deh): additional export *)
 val tcoq_fold_left2_goal : (Evd.evar -> 'a -> 'b -> 'b tactic) -> 'b -> 'a list -> 'b tactic
