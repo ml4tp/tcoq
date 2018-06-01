@@ -727,7 +727,7 @@ let tcoq_catch_error_tac ist call_trace tac call extra =
 
 let tcoq_wrap_catchfail_tac ist tac name extra =
   let loc = dloc in 
-  let dp = DirPath.make [Names.Id.of_string "tcoq"] in
+  let dp = DirPath.make [Names.Id.of_string "ml4tp"] in
   let s = Names.KerName.make2 (Names.ModPath.MPfile dp) (Names.mk_label name) in
   let call = (loc, LtacNotationCall s) in
   tcoq_wrap_tac ist tac call extra
