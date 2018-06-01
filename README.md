@@ -1,6 +1,6 @@
 # Traced Coq
 
-[Traced Coq](TCOQ_README.md)
+Please follow this link to see [Traced Coq](TCOQ_README.md). The items below is the README for Coq.
 
 # Coq
 Coq is a formal proof management system. It provides a formal language to write
