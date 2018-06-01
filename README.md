@@ -1,3 +1,7 @@
+# Traced Coq
+
+[Traced Coq](TCOQ_README.md)
+
 # Coq
 Coq is a formal proof management system. It provides a formal language to write
 mathematical definitions, executable algorithms and theorems together with an
