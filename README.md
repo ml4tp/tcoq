@@ -1,6 +1,8 @@
 # Traced Coq
 
-Please follow this link to see [Traced Coq](TCOQ_README.md). The items below is the README for Coq.
+Traced Coq, or TCoq, is a modification to Coq 8.6.1 that dumps out all the intermediate proof states encountered in a proof as data structures for the purpose of applying machine learning. Please follow this link to see (Traced Coq)[TCOQ_README.md].
+
+The README for Coq is below.
 
 # Coq
 Coq is a formal proof management system. It provides a formal language to write
