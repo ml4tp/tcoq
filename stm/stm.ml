@@ -2603,6 +2603,7 @@ let process_transaction ?(newtip=Stateid.fresh ()) ~tty
               let proof_mode = default_proof_mode () in
               VCS.branch bname (`Proof (proof_mode, VCS.proof_nesting () + 1));
               Proof_global.activate_proof_mode proof_mode;
+              Ptcoq.begin_proof_nonstd expr;
             end else begin
               VCS.commit id (mkTransCmd x [] in_proof `MainQueue);
               (* We hope it can be replayed, but we can't really know *)

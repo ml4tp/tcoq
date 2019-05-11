@@ -186,7 +186,11 @@ let rec share_constr constr =
       | Evar (exk, cs) -> 
           let idxs = (share_constrs cs) in
           with_constr_idx constr (Printf.sprintf "E %d [%s]" (show_evar exk) idxs)
-      | Sort sort -> with_constr_idx constr (Printf.sprintf "S %s" (string_of_ppcmds (Univ.Universe.pr (Sorts.univ_of_sort sort))))
+      | Sort sort -> begin
+          match Univ.Universe.level (Sorts.univ_of_sort sort) with
+          | None -> with_constr_idx constr (Printf.sprintf "S NONE" )
+          | Some u -> with_constr_idx constr (Printf.sprintf "S %s" (Univ.Level.to_string u))
+        end
       | Cast (c, ck, t) ->
           let idx1 = share_constr c in
           let idx2 = share_constr t in
@@ -1479,9 +1483,34 @@ let finalize_proof () =
   dump_pretty_tacst_goalM ();
   tcoq_flush()
 
+let rec show_vernac_exp ve =
+  match ve with
+  | VernacLocal (_, expr') -> show_vernac_exp expr'
+  | VernacProgram expr' -> begin
+      match expr' with
+      | VernacDefinition (_, ((loc, id), _), _) ->
+          "TCOQ_DEFINITION_" ^ show_id id
+      | VernacInstance (_, _, (((loc, inst_name), _), _, _), _, _) ->
+          "TCOQ_INSTANCE_" ^ show_name inst_name
+      | VernacFixpoint (_, ls) ->
+          let names = List.map (fun ((((loc, id), _), _, _, _, _), _) -> id) ls in
+          "TCOQ_FIXPOINT_" ^ show_ls show_id "_" names
+      | VernacCoFixpoint (_, ls) ->
+          let names = List.map (fun ((((loc, id), _), _, _, _), _) -> id) ls in
+          "TCOQ_COFIXPOINT_" ^ show_ls show_id "_" names
+      | _ -> "TCOQ_UNKNOWN_BEGIN_PROOF_" ^ Pp.string_of_ppcmds (Ppvernac.pr_vernac ve)
+      end
+  | VernacInstance (_, _, (((loc, inst_name), _), _, _), _, _) ->
+      "TCOQ_INSTANCE_" ^ show_name inst_name
+  | _ -> "TCOQ_UNKNOWN_BEGIN_PROOF_" ^ Pp.string_of_ppcmds (Ppvernac.pr_vernac ve)
+
+let begin_proof_nonstd ve =
+  initialize_proof ();
+  tcoq_write (Printf.sprintf "bg(pf) {!} {!} %s\n" (show_vernac_exp ve))
+
 let rec show_vernac_typ_exp vt ve =
   match vt with
-  | VtStartProof (name, _, names) -> 
+  | VtStartProof (name, _, names) ->
       initialize_proof ();
       tcoq_write (Printf.sprintf "bg(pf) {!} %s {!} %s\n" name (show_ls show_id ", " names))
   | VtSideff _ -> ()
